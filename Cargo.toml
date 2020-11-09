@@ -18,5 +18,3 @@ rmp-serde = "^0.14"
 serde_json = "1.0"
 thiserror = "1.0"
 
-[patch.crates-io]
-pete = { path = "deps/pete" }
