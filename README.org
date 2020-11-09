@@ -1,0 +1,51 @@
+* Overview
+
+This tool makes it easy to capture the steps taken during the build process of a software project. This can be very useful for:
+- Understanding build processes
+- Debugging obscure build problems
+- Applying static analysis and verification tools
+
+In the first two cases, this tool gives a low-level view of exactly the set of files accessed by the build process (e.g., fully resolving all file includes and relative paths) in a way that is difficult to achieve by merely reading and understanding a build system. In a sense, it identifies the *bill of materials* for software.
+
+In the third case, assurance tools generally require rebuilding programs in special modes or with alternative compilers (e.g., into LLVM bitcode for analysis or instrumentation). Doing so is typically labor intensive, as it requires extensive work to understand an existing build system, and more work still to modify it.  This tool provides a way to apply analysis tools in a build system agnostic way.
+
+This tool is primarily designed to help tame the myriad build systems of the C/C++ ecosystem, but it applies to any software project with a build step.
+
+* Usage
+
+The workflow of this tool proceeds in two phases:
+1. Tracing the existing build process
+2. Analyzing the trace and replaying it with modifications
+
+The traces can be independently useful for build process analysis, even if replay is not desired.  An example use of the tool is shown below for a ~make~-based build:
+
+#+BEGIN_SRC
+
+$ build-bom trace --output=/tmp/my-build.json -- make
+$ build-bom normalize --input=/tmp/my-build.json --output=/tmp/my-build-norm.json # Optional, but potentially informative
+$ build-bom bitcode --input=/tmp/my-build-norm.json --output /tmp/target.bc
+
+#+END_SRC
+
+In the first step, the tool acts as a wrapper around the real build system.  There are a few options available for tracing; the normal build system command is specified after the argument terminator (~--~).  The tracer is agnostic to the build system (as long as it isn't running as a separate service).
+
+In the next step, the collected trace is normalized according to some default rules to make the trace more compact and easier to read.  The normalization process primarily removes failed system calls that some build systems speculatively execute (e.g., testing multiple possible locations for the compiler).  Each normalization pass can be individually selected; if none are explicitly selected, a useful set of defaults are applied.
+
+In the third step, the trace is analyzed and partially replayed to build LLVM bitcode from the project.  The resulting bitcode is suitable for analysis or verification, as desired.
+
+* Design
+
+The tool uses low-level operating system services to observe builds and record their actions.  On Linux, it uses ~ptrace~ to record all relevant system calls into a log.  The tracing is designed to capture all of the information necessary to replay a build.  It currently doesn't capture everything (especially file move and directory operations), but will be extended as-needed.  Beyond system calls, it also captures the environment and working directory of each executed command.
+
+The tool currently supports Linux, but is designed so that it will be modular enough to have separate tracing implementations for MacOS and Windows, while sharing the rest of the code.
+
+* Roadmap
+
+- Serious polish required
+- Build step dependency analysis for in-order replay
+- Automated granular filename tracking (to precisely model renames)
+- Fix parallel builds
+- Full handling of environment variables
+- Easier scripting
+- MacOS backend based on Dtrace
+- Windows backend
