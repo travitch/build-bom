@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use serde::{Serialize, Deserialize};
 
-#[derive(Debug,Serialize,Deserialize)]
+#[derive(Debug,Serialize,Deserialize,Clone)]
 pub struct TraceEvent {
     pub pid : i32,
     pub evt : EventType
@@ -16,7 +16,7 @@ pub struct Environment {
     pub bytes : Vec<u8>
 }
 
-#[derive(Debug,Serialize,Deserialize)]
+#[derive(Debug,Serialize,Deserialize,Clone)]
 pub enum EventType {
     Fork { old_pid : i32, new_pid : i32 },
     Exit { pid : i32, exit_code : i32 },

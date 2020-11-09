@@ -5,7 +5,7 @@ use std::fs::File;
 use std::path::PathBuf;
 use serde_json;
 
-use crate::bom::options::{NormalizeOptions,StringNormalizeStrategy};
+use crate::bom::options::{NormalizeOptions,StringNormalizeStrategy,Normalization};
 use crate::bom::raw::{RawTraceEvent,RawString,RawEventType};
 use crate::bom::event::{EventType,TraceEvent,EnvID,Environment};
 use crate::bom::versioning::{Header,DataFormat,CURRENT_VERSION};
@@ -38,7 +38,18 @@ pub fn normalize_entrypoint(normalize_opts : &NormalizeOptions) -> anyhow::Resul
         raw_events.push(raw_event);
     }
 
-    let (envs, trace_events) = normalize(&normalize_opts.strategy, raw_events.as_slice())?;
+    let mut normalizations = Vec::new();
+    if normalize_opts.all_normalizations {
+        normalizations.push(Normalization::ElideClose);
+        normalizations.push(Normalization::ElideFailedOpen);
+        normalizations.push(Normalization::ElideFailedExec);
+    } else {
+        for n in &normalize_opts.normalize {
+            normalizations.push(*n);
+        }
+    }
+
+    let (envs, grouped_trace_events) = normalize(&normalize_opts.strategy, &normalizations, raw_events.as_slice())?;
     let out_file = std::fs::File::create(&normalize_opts.output)?;
     let mut buf_out = std::io::BufWriter::new(out_file);
 
@@ -55,9 +66,11 @@ pub fn normalize_entrypoint(normalize_opts : &NormalizeOptions) -> anyhow::Resul
     }
 
     // Write out all of our collected events (which refer to the environments above)
-    for trace_event in trace_events {
-        serde_json::to_writer(&mut buf_out, &trace_event)?;
-        buf_out.write("\n".as_bytes())?;
+    for (_task_id, trace_events) in grouped_trace_events {
+        for trace_event in trace_events {
+            serde_json::to_writer(&mut buf_out, &trace_event)?;
+            buf_out.write("\n".as_bytes())?;
+        }
     }
 
     Ok(())
@@ -94,14 +107,161 @@ fn check_version(file_path : &PathBuf, first_line : Option<Result<String, std::i
 /// The normalized form of the event trace includes tracking environments on the
 /// side to increase sharing; the returned `HashMap` maps environments to their
 /// unique identifiers.
-pub fn normalize(strategy : &StringNormalizeStrategy, raw_events : &[RawTraceEvent]) -> Result<(HashMap<Vec<u8>, EnvID>, Vec<TraceEvent>), NormalizationError> {
+pub fn normalize(strategy : &StringNormalizeStrategy, normalizations : &[Normalization], raw_events : &[RawTraceEvent]) -> Result<(HashMap<Vec<u8>, EnvID>, HashMap<i32, Vec<TraceEvent>>), NormalizationError> {
     let mut envs = HashMap::new();
     let events = raw_events.iter().try_fold(Vec::new(), |mut acc, re| {
         let ev = raw_to_event(strategy, &mut envs, &re)?;
         acc.push(ev);
         Ok(acc)
     })?;
-    Ok((envs, events))
+
+    // Here, we have a linear sequence of events that have been parsed into a
+    // decent form (with real Rust strings).
+    //
+    // Next, we need to group events by *task* (i.e., build step/event).
+    //
+    // FIXME: In the long term, we need to use surrogate IDs here because PIDs
+    // can be reused (even though it takes a while).
+    //
+    // We need to group by task because, in a parallel build, related events
+    // (e.g., exec / failed exec) might not be contiguous because they can be
+    // interleaved with the events from multiple processes.
+    //
+    // We will scan through the linear sequence of events and sort them into
+    // per-task Vecs (which can be normalized independently)
+    let mut groups = HashMap::new();
+    for event in events {
+        match groups.get(&event.pid) {
+            Some(_) => {}
+            None => {
+                groups.insert(event.pid, Vec::new());
+            }
+        }
+
+        let task_vec = groups.get_mut(&event.pid).unwrap();
+        task_vec.push(event);
+    }
+
+    let mut normed_groups = HashMap::new();
+    for (event_id, event_trace) in &groups {
+        let normed = apply_normalizations(&normalizations, &event_trace);
+        normed_groups.insert(*event_id, normed);
+    }
+
+    Ok((envs, normed_groups))
+}
+
+fn apply_normalizations<'a>(normalizations : &'a [Normalization], event_trace : &'a [TraceEvent]) -> Vec<TraceEvent> {
+    let mut res = Vec::new();
+    let initial_it = Box::new(event_trace.iter()) as Box<dyn Iterator<Item=&'a TraceEvent> + 'a>;
+    let mut it = normalizations.iter().fold(initial_it, add_normalization_iterator);
+    while let Some(evt_ref) = it.next() {
+        res.push(evt_ref.clone());
+    }
+
+    res
+}
+
+fn add_normalization_iterator<'a>(iter : Box<dyn Iterator<Item=&'a TraceEvent> + 'a>, norm : &Normalization) -> Box<dyn Iterator<Item=&'a TraceEvent> + 'a> {
+    match norm {
+        Normalization::ElideClose => { Box::new(iter.filter(|evt| !is_close_event(evt))) }
+        Normalization::ElideFailedOpen => {
+            let piter = iter.peekable() as std::iter::Peekable<Box<dyn Iterator<Item=&'a TraceEvent>>>;
+            Box::new(elide_failed_open(piter))
+        }
+        Normalization::ElideFailedExec => {
+            let piter = iter.peekable() as std::iter::Peekable<Box<dyn Iterator<Item=&'a TraceEvent>>>;
+            Box::new(elide_failed_exec(piter))
+        }
+    }
+}
+
+struct ElideFailedOpen<'a> {
+    base : std::iter::Peekable<Box<dyn Iterator<Item=&'a TraceEvent> + 'a>>
+}
+
+impl <'a> Iterator for ElideFailedOpen<'a> {
+    type Item = &'a TraceEvent;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            // We return this item *if*:
+            //
+            // 1. It is not an open, or
+            // 2. The next item is not an open failure
+            let item = self.base.next();
+            match item {
+                None => { return None }
+                Some(TraceEvent { evt : EventType::OpenFileAt { .. }, .. }) |
+                Some(TraceEvent { evt : EventType::OpenFile { .. }, .. }) => {
+                    let successor = self.base.peek();
+                    match successor {
+                        Some(TraceEvent { evt : EventType::OpenFileReturn { result }, ..}) => {
+                            if *result < 0 {
+                                // Skip the next item because it is just the failure
+                                self.base.next();
+                                // Don't return so we take another loop
+                                // iteration and find the next item
+                            } else {
+                                return item
+                            }
+                        }
+                        _ => { return item }
+                    }
+                }
+                Some(_) => { return item }
+            }
+        }
+    }
+}
+
+fn elide_failed_open<'a>(it : std::iter::Peekable<Box<dyn Iterator<Item=&'a TraceEvent> + 'a>>) -> ElideFailedOpen<'a> {
+    ElideFailedOpen { base : it }
+}
+
+struct ElideFailedExec<'a> {
+    base : std::iter::Peekable<Box<dyn Iterator<Item=&'a TraceEvent> + 'a>>
+}
+
+impl <'a> Iterator for ElideFailedExec<'a> {
+    type Item = &'a TraceEvent;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            // We return this item *if*:
+            //
+            // 1. It is not an exec, or
+            // 2. The next item is not an exec failure
+            let item = self.base.next();
+            match item {
+                None => { return None }
+                Some(TraceEvent { evt : EventType::Exec { .. }, .. }) => {
+                    let successor = self.base.peek();
+                    match successor {
+                        Some(TraceEvent { evt : EventType::FailedExec { .. }, ..}) => {
+                            // Skip the next item because it is just the failure
+                            // (and also try another loop iteration)
+                            self.base.next();
+                        }
+                        _ => { return item }
+                    }
+                }
+                Some(_) => { return item }
+            }
+        }
+    }
+}
+
+fn elide_failed_exec<'a>(it : std::iter::Peekable<Box<dyn Iterator<Item=&'a TraceEvent> + 'a>>) -> ElideFailedExec<'a> {
+    ElideFailedExec { base : it }
+}
+
+
+fn is_close_event(trace_event : &TraceEvent) -> bool {
+    match trace_event.evt {
+        EventType::CloseFile { .. } => { true }
+        _ => { false }
+    }
 }
 
 #[derive(thiserror::Error,Debug)]

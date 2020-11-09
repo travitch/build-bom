@@ -24,7 +24,43 @@ pub struct NormalizeOptions {
     #[structopt(short = "o", long = "output", help = "The file to save normalized traced build actions to")]
     pub output : PathBuf,
     #[structopt(default_value, short = "s", long = "strategy", help = "The translation strategy for strings")]
-    pub strategy : StringNormalizeStrategy
+    pub strategy : StringNormalizeStrategy,
+    #[structopt(short = "n", long = "normalize", help = "Enable the named normalization strategy")]
+    pub normalize : Vec<Normalization>,
+    #[structopt(short = "a", long = "all", help = "Enable all normalization passes")]
+    pub all_normalizations : bool
+}
+
+#[derive(Debug,StructOpt,Hash,Eq,PartialEq,PartialOrd,Ord,Copy,Clone)]
+pub enum Normalization {
+    ElideClose,
+    ElideFailedOpen,
+    ElideFailedExec
+}
+
+#[derive(Debug)]
+pub struct InvalidNormalization(String);
+
+impl FromStr for Normalization {
+    type Err = InvalidNormalization;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "elide-close" => { Ok(Normalization::ElideClose) }
+            "elide-failed-open" => { Ok(Normalization::ElideFailedOpen) }
+            "elide-failed-exec" => { Ok(Normalization::ElideFailedExec) }
+            err => { Err(InvalidNormalization(err.to_owned())) }
+        }
+    }
+}
+
+impl ToString for Normalization {
+    fn to_string(&self) -> String {
+        match self {
+            Normalization::ElideClose => { "elide-close".to_owned() }
+            Normalization::ElideFailedOpen => { "elide-failed-open".to_owned() }
+            Normalization::ElideFailedExec => { "elide-failed-exec".to_owned() }
+        }
+    }
 }
 
 #[derive(Debug,StructOpt)]
@@ -65,6 +101,14 @@ impl ToString for InvalidStrategy {
     fn to_string(&self) -> String {
         match self {
             InvalidStrategy(s) => { format!("InvalidStrategy({})", s) }
+        }
+    }
+}
+
+impl ToString for InvalidNormalization {
+    fn to_string(&self) -> String {
+        match self {
+            InvalidNormalization(s) => { format!("InvalidNormalization({})", s) }
         }
     }
 }
