@@ -29,6 +29,7 @@ pub struct RawTraceEvent {
 #[derive (Debug,Serialize,Deserialize)]
 pub enum RawEventType {
     Fork { old_pid : i32, new_pid : i32 },
+    Exit { pid : i32, exit_code : i32 },
     Exec { command : RawString, args : Vec<RawString>, cwd : PathBuf, environment : Vec<u8> },
     FailedExec { result : i32 },
     OpenFile { path : RawString, flags: u32, mode : u32 },

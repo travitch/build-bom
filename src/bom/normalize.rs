@@ -135,6 +135,7 @@ fn normalize_string(strategy : &StringNormalizeStrategy, rs : &RawString) -> Res
 
 fn raw_to_event(strategy : &StringNormalizeStrategy, envs : &mut HashMap<Vec<u8>, EnvID>, raw : &RawTraceEvent) -> Result<TraceEvent, NormalizationError> {
     let new_event = match &raw.evt {
+        RawEventType::Exit { pid, exit_code } => { Ok(EventType::Exit { pid : *pid, exit_code : *exit_code }) }
         RawEventType::CloseFile { fd } => { Ok(EventType::CloseFile { fd : *fd }) }
         RawEventType::OpenFileReturn { result } => { Ok(EventType::OpenFileReturn { result : *result }) }
         RawEventType::Fork { old_pid, new_pid } => { Ok(EventType::Fork { old_pid : *old_pid, new_pid : *new_pid }) }

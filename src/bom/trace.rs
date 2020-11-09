@@ -62,6 +62,9 @@ fn trace_events(syscalls : BTreeMap<u64, String>, mut ptracer : Ptracer, mut wri
             Stop::Vfork(pid, new_pid) => {
                 write_event(&mut writer, &mut tracee, RawEventType::Fork { old_pid : pid.as_raw(), new_pid : new_pid.as_raw() })?;
             }
+            Stop::Exiting(pid, exit_code) => {
+                write_event(&mut writer, &mut tracee, RawEventType::Exit { pid : pid.as_raw(), exit_code : exit_code })?;
+            }
             Stop::SyscallEnterStop(..) => {
                 let rax = regs.orig_rax;
                 let syscall = syscalls.get(&rax).unwrap();

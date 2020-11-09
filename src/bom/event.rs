@@ -19,6 +19,7 @@ pub struct Environment {
 #[derive(Debug,Serialize,Deserialize)]
 pub enum EventType {
     Fork { old_pid : i32, new_pid : i32 },
+    Exit { pid : i32, exit_code : i32 },
     Exec { command : String, args : Vec<String>, environment : EnvID, cwd : PathBuf },
     FailedExec { result : i32 },
     OpenFile { path : PathBuf, flags : u32, mode : u32 },
