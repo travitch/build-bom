@@ -13,7 +13,20 @@ pub struct Options {
 #[derive(Debug,StructOpt)]
 pub enum Subcommand {
     Trace(TraceOptions),
-    Normalize(NormalizeOptions)
+    Normalize(NormalizeOptions),
+    Bitcode(BitcodeOptions)
+}
+
+#[derive(Debug,StructOpt)]
+pub struct BitcodeOptions {
+    #[structopt(short="i", long="input", help="A file containing traced build actions")]
+    pub input : PathBuf,
+    #[structopt(short="o", long="output", help="The file to save generated bitcode to")]
+    pub output : PathBuf,
+    #[structopt(long="clang", help="Name of the clang binary to use to generate bitcode (default: `clang`)")]
+    pub clang_path : Option<PathBuf>,
+    #[structopt(long="llvm-link", help="Name of the llvm-link binary to use to generate bitcode (default: `llvm-link`)")]
+    pub llvm_link_path : Option<PathBuf>
 }
 
 #[derive(Debug,StructOpt)]

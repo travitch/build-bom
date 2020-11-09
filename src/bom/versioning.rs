@@ -5,8 +5,7 @@ use serde::{Serialize,Deserialize};
 #[derive(Debug,Serialize,Deserialize)]
 pub enum DataFormat {
     Raw,
-    Normalized,
-    Analyzed
+    Normalized
 }
 
 #[derive(Debug,Serialize,Deserialize)]

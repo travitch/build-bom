@@ -1,7 +1,5 @@
 use std::collections::HashMap;
-use std::io::{BufReader,BufRead};
 use std::io::Write;
-use std::fs::File;
 use std::path::PathBuf;
 use serde_json;
 
@@ -9,6 +7,7 @@ use crate::bom::options::{NormalizeOptions,StringNormalizeStrategy,Normalization
 use crate::bom::raw::{RawTraceEvent,RawString,RawEventType};
 use crate::bom::event::{EventType,TraceEvent,EnvID,Environment};
 use crate::bom::versioning::{Header,DataFormat,CURRENT_VERSION};
+use crate::bom::loader::{load_trace,LoadedTrace};
 
 /// The command-line entry point for the normalization process
 ///
@@ -25,78 +24,53 @@ use crate::bom::versioning::{Header,DataFormat,CURRENT_VERSION};
 /// Strings will be converted; traced values that are intended to be binary data
 /// will be retained as binary data without conversion.
 pub fn normalize_entrypoint(normalize_opts : &NormalizeOptions) -> anyhow::Result<()> {
-    let f = File::open(&normalize_opts.input)?;
-    let reader = BufReader::new(f);
-    let mut line_it = reader.lines();
-    let first_line = line_it.next();
-    check_version(&normalize_opts.input, first_line)?;
+    let loaded_trace = load_trace(&normalize_opts.input)?;
 
-    let mut raw_events = Vec::new();
-    for line in line_it {
-        let data = line.unwrap();
-        let raw_event = serde_json::from_str::<RawTraceEvent>(&data)?;
-        raw_events.push(raw_event);
-    }
-
-    let mut normalizations = Vec::new();
-    if normalize_opts.all_normalizations {
-        normalizations.push(Normalization::ElideClose);
-        normalizations.push(Normalization::ElideFailedOpen);
-        normalizations.push(Normalization::ElideFailedExec);
-    } else {
-        for n in &normalize_opts.normalize {
-            normalizations.push(*n);
-        }
-    }
-
-    let (envs, grouped_trace_events) = normalize(&normalize_opts.strategy, &normalizations, raw_events.as_slice())?;
-    let out_file = std::fs::File::create(&normalize_opts.output)?;
-    let mut buf_out = std::io::BufWriter::new(out_file);
-
-    // Write out our updated header
-    let header = Header { version : CURRENT_VERSION, data_format : DataFormat::Normalized };
-    serde_json::to_writer(&mut buf_out, &header)?;
-    buf_out.write("\n".as_bytes())?;
-
-    // Write out all of the collected (uniquified) environments
-    for (env, envid) in envs {
-        let e = Environment { id : envid, bytes : env };
-        serde_json::to_writer(&mut buf_out, &e)?;
-        buf_out.write("\n".as_bytes())?;
-    }
-
-    // Write out all of our collected events (which refer to the environments above)
-    for (_task_id, trace_events) in grouped_trace_events {
-        for trace_event in trace_events {
-            serde_json::to_writer(&mut buf_out, &trace_event)?;
-            buf_out.write("\n".as_bytes())?;
-        }
-    }
-
-    Ok(())
-}
-
-/// Ensure that the file version is what we expect, and that the data is in fact raw
-fn check_version(file_path : &PathBuf, first_line : Option<Result<String, std::io::Error>>) -> anyhow::Result<()> {
-    match first_line {
-        None => { Err(anyhow::Error::new(NormalizationError::EmptyFile(file_path.clone()))) }
-        Some(data) => {
-            match serde_json::from_str::<Header>(&data.unwrap()) {
-                Err(_) => { Err(anyhow::Error::new(NormalizationError::MissingHeader(file_path.clone()))) }
-                Ok(header) => {
-                    if header.version != CURRENT_VERSION {
-                        Err(anyhow::Error::new(NormalizationError::VersionMismatch(header.version, CURRENT_VERSION)))
-                    } else {
-                        match header.data_format {
-                            DataFormat::Raw => { Ok(()) }
-                            DataFormat::Normalized => { Err(anyhow::Error::new(NormalizationError::ExpectedRawData(header.data_format))) }
-                            DataFormat::Analyzed => { Err(anyhow::Error::new(NormalizationError::ExpectedRawData(header.data_format))) }
-                        }
-                    }
+    match loaded_trace {
+        LoadedTrace::RawTrace(raw_events) => {
+            let mut normalizations = Vec::new();
+            if normalize_opts.all_normalizations {
+                normalizations.push(Normalization::ElideClose);
+                normalizations.push(Normalization::ElideFailedOpen);
+                normalizations.push(Normalization::ElideFailedExec);
+            } else {
+                for n in &normalize_opts.normalize {
+                    normalizations.push(*n);
                 }
             }
+
+            let (envs, grouped_trace_events) = normalize(&normalize_opts.strategy, &normalizations, raw_events.as_slice())?;
+            let out_file = std::fs::File::create(&normalize_opts.output)?;
+            let mut buf_out = std::io::BufWriter::new(out_file);
+
+            // Write out our updated header
+            let header = Header { version : CURRENT_VERSION, data_format : DataFormat::Normalized };
+            serde_json::to_writer(&mut buf_out, &header)?;
+            buf_out.write("\n".as_bytes())?;
+
+            // Write out all of the collected (uniquified) environments
+            for (env, envid) in envs {
+                let e = Environment { id : envid, bytes : env };
+                serde_json::to_writer(&mut buf_out, &e)?;
+                buf_out.write("\n".as_bytes())?;
+            }
+
+            // Write out all of our collected events (which refer to the environments above)
+            for (_task_id, trace_events) in grouped_trace_events {
+                for trace_event in trace_events {
+                    serde_json::to_writer(&mut buf_out, &trace_event)?;
+                    buf_out.write("\n".as_bytes())?;
+                }
+            }
+
+        }
+        LoadedTrace::NormalizedTrace(_,_) => {
+            println!("Input file {:?} is already normalized", &normalize_opts.input);
         }
     }
+
+
+    Ok(())
 }
 
 /// Normalize a sequence of raw events
@@ -269,15 +243,7 @@ pub enum NormalizationError {
     #[error("Non-UTF8 string found in event '{0:?}'")]
     NonUTF8String(Vec<u8>),
     #[error("Invalid memory address found in event '{0:?}'")]
-    InvalidMemoryAddress(u64),
-    #[error("File missing or empty: '{0:?}'")]
-    EmptyFile(PathBuf),
-    #[error("Expected raw-format trace data, but got '{0:?}'")]
-    ExpectedRawData(DataFormat),
-    #[error("Version header missing in file '{0:?}'")]
-    MissingHeader(PathBuf),
-    #[error("Trace metadata version mismatch (got {0:?} but expected {1:?})")]
-    VersionMismatch(u32, u32)
+    InvalidMemoryAddress(u64)
 }
 
 fn normalize_string(strategy : &StringNormalizeStrategy, rs : &RawString) -> Result<String, NormalizationError> {

@@ -26,6 +26,7 @@ pub struct RawTraceEvent {
     pub evt : RawEventType
 }
 
+/// FIXME: Track renames (and potentially copies)
 #[derive (Debug,Serialize,Deserialize)]
 pub enum RawEventType {
     Fork { old_pid : i32, new_pid : i32 },

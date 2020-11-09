@@ -7,7 +7,7 @@ pub struct TraceEvent {
     pub evt : EventType
 }
 
-#[derive(Debug,Serialize,Deserialize,Clone)]
+#[derive(Debug,Serialize,Deserialize,Clone,Hash,Eq,PartialEq,Ord,PartialOrd)]
 pub struct EnvID(pub u32);
 
 #[derive(Debug,Serialize,Deserialize)]
