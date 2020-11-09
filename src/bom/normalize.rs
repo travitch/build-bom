@@ -5,7 +5,7 @@ use std::fs::File;
 use std::path::PathBuf;
 use serde_json;
 
-use crate::bom::options::{NormalizeOptions,NormalizeStrategy};
+use crate::bom::options::{NormalizeOptions,StringNormalizeStrategy};
 use crate::bom::raw::{RawTraceEvent,RawString,RawEventType};
 use crate::bom::event::{EventType,TraceEvent,EnvID,Environment};
 use crate::bom::versioning::{Header,DataFormat,CURRENT_VERSION};
@@ -94,7 +94,7 @@ fn check_version(file_path : &PathBuf, first_line : Option<Result<String, std::i
 /// The normalized form of the event trace includes tracking environments on the
 /// side to increase sharing; the returned `HashMap` maps environments to their
 /// unique identifiers.
-pub fn normalize(strategy : &NormalizeStrategy, raw_events : &[RawTraceEvent]) -> Result<(HashMap<Vec<u8>, EnvID>, Vec<TraceEvent>), NormalizationError> {
+pub fn normalize(strategy : &StringNormalizeStrategy, raw_events : &[RawTraceEvent]) -> Result<(HashMap<Vec<u8>, EnvID>, Vec<TraceEvent>), NormalizationError> {
     let mut envs = HashMap::new();
     let events = raw_events.iter().try_fold(Vec::new(), |mut acc, re| {
         let ev = raw_to_event(strategy, &mut envs, &re)?;
@@ -120,20 +120,20 @@ pub enum NormalizationError {
     VersionMismatch(u32, u32)
 }
 
-fn normalize_string(strategy : &NormalizeStrategy, rs : &RawString) -> Result<String, NormalizationError> {
+fn normalize_string(strategy : &StringNormalizeStrategy, rs : &RawString) -> Result<String, NormalizationError> {
     match rs {
         RawString::SafeString(s) => { Ok(s.clone()) }
         RawString::UnreadableMemoryAddress(a) => { Err(NormalizationError::InvalidMemoryAddress(*a)) }
         RawString::BinaryString(bytes) => {
             match strategy {
-                NormalizeStrategy::Strict => { Err(NormalizationError::NonUTF8String(bytes.clone())) }
-                NormalizeStrategy::Lenient => { Ok(std::string::String::from_utf8_lossy(bytes).to_mut().to_string()) }
+                StringNormalizeStrategy::Strict => { Err(NormalizationError::NonUTF8String(bytes.clone())) }
+                StringNormalizeStrategy::Lenient => { Ok(std::string::String::from_utf8_lossy(bytes).to_mut().to_string()) }
             }
         }
     }
 }
 
-fn raw_to_event(strategy : &NormalizeStrategy, envs : &mut HashMap<Vec<u8>, EnvID>, raw : &RawTraceEvent) -> Result<TraceEvent, NormalizationError> {
+fn raw_to_event(strategy : &StringNormalizeStrategy, envs : &mut HashMap<Vec<u8>, EnvID>, raw : &RawTraceEvent) -> Result<TraceEvent, NormalizationError> {
     let new_event = match &raw.evt {
         RawEventType::CloseFile { fd } => { Ok(EventType::CloseFile { fd : *fd }) }
         RawEventType::OpenFileReturn { result } => { Ok(EventType::OpenFileReturn { result : *result }) }

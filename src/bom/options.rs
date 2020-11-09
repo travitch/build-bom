@@ -24,7 +24,7 @@ pub struct NormalizeOptions {
     #[structopt(short = "o", long = "output", help = "The file to save normalized traced build actions to")]
     pub output : PathBuf,
     #[structopt(default_value, short = "s", long = "strategy", help = "The translation strategy for strings")]
-    pub strategy : NormalizeStrategy
+    pub strategy : StringNormalizeStrategy
 }
 
 #[derive(Debug,StructOpt)]
@@ -39,24 +39,24 @@ pub struct TraceOptions {
 #[derive(Debug)]
 pub struct InvalidStrategy(String);
 
-impl FromStr for NormalizeStrategy {
+impl FromStr for StringNormalizeStrategy {
     type Err = InvalidStrategy;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "strict" => { Ok(NormalizeStrategy::Strict) }
-            "lenient" => { Ok(NormalizeStrategy::Lenient) }
-            "Strict" => { Ok(NormalizeStrategy::Strict) }
-            "Lenient" => { Ok(NormalizeStrategy::Lenient) }
+            "strict" => { Ok(StringNormalizeStrategy::Strict) }
+            "lenient" => { Ok(StringNormalizeStrategy::Lenient) }
+            "Strict" => { Ok(StringNormalizeStrategy::Strict) }
+            "Lenient" => { Ok(StringNormalizeStrategy::Lenient) }
             err => { Err(InvalidStrategy(err.to_owned())) }
         }
     }
 }
 
-impl ToString for NormalizeStrategy {
+impl ToString for StringNormalizeStrategy {
     fn to_string(&self) -> String {
         match self {
-            NormalizeStrategy::Strict => { "Strict".to_owned() }
-            NormalizeStrategy::Lenient => { "Lenient".to_owned() }
+            StringNormalizeStrategy::Strict => { "Strict".to_owned() }
+            StringNormalizeStrategy::Lenient => { "Lenient".to_owned() }
         }
     }
 }
@@ -70,13 +70,13 @@ impl ToString for InvalidStrategy {
 }
 
 #[derive(Debug,StructOpt)]
-pub enum NormalizeStrategy {
+pub enum StringNormalizeStrategy {
     #[structopt(help="Require no encoding errors when converting strings from raw form to their Rust forms")]
     Strict,
     #[structopt(help="Replace invalid utf-8 encoded data with defaults; this can make builds non-replayable")]
     Lenient
 }
 
-impl Default for NormalizeStrategy {
-    fn default () -> Self { NormalizeStrategy ::Strict }
+impl Default for StringNormalizeStrategy {
+    fn default () -> Self { StringNormalizeStrategy ::Strict }
 }
