@@ -39,6 +39,15 @@ The tool uses low-level operating system services to observe builds and record t
 
 The tool currently supports Linux, but is designed so that it will be modular enough to have separate tracing implementations for MacOS and Windows, while sharing the rest of the code.
 
+** Related Tools
+
+Earlier tools in this space include
+
+- [[https://github.com/travitch/whole-program-llvm][wllvm]]
+- [[https://github.com/SRI-CSL/gllvm][gllvm]]
+
+These tools act as drop-in replacements that pretend to be your normal compiler and linker, but run additional commands to also compile the program to LLVM bitcode.  These tools are very effective, but can require significant understanding and re-engineering of build systems to integrate.  The ~build-bom~ tool is designed to support build system analysis without any modifications to the existing build system (and ideally without ever even looking at it).
+
 * Roadmap
 
 - Serious polish required
