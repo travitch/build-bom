@@ -52,10 +52,15 @@ These tools act as drop-in replacements that pretend to be your normal compiler 
 
 - Serious polish required
 - Build step dependency analysis for in-order replay
+- Add more thorough support for Linux system calls
+  - Add a 32 bit x86 syscall table
+  - Add ARM syscall tables
+  - Explore automated processing of system call argument lists
 - Additional tools
   - Dependency graph analyzer and visualizer
   - A command to list all targets (or all library targets or all executable targets)
   - A command to rebuild a target binary with libfuzzer, Address Sanitizer, or Thread Sanitizer
+  - Add a command to randomly test for potential missing dependencies in build systems
 - Automated granular filename tracking (to precisely model renames)
 - Fix parallel builds
 - Full handling of environment variables
