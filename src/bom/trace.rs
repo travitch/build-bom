@@ -82,9 +82,6 @@ fn trace_events(syscalls : BTreeMap<u64, String>, mut ptracer : Ptracer, mut wri
                     let flags = regs.rdx as u32;
                     let mode = regs.r10 as u32;
                     write_event(&mut writer, &mut tracee, RawEventType::OpenFileAt { at_dir : at_fd, path : path, flags : flags, mode : mode })?;
-                } else if syscall == "chdir" {
-                    let new_cwd = read_str_from(&mut tracee, regs.rdi);
-                    write_event(&mut writer, &mut tracee, RawEventType::ChangeWorkingDirectory { new_cwd : new_cwd })?;
                 } else if syscall == "close" {
                     let fd = regs.rdi as i32;
                     write_event(&mut writer, &mut tracee, RawEventType::CloseFile { fd : fd })?;

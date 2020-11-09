@@ -139,11 +139,6 @@ fn raw_to_event(strategy : &NormalizeStrategy, envs : &mut HashMap<Vec<u8>, EnvI
         RawEventType::OpenFileReturn { result } => { Ok(EventType::OpenFileReturn { result : *result }) }
         RawEventType::Fork { old_pid, new_pid } => { Ok(EventType::Fork { old_pid : *old_pid, new_pid : *new_pid }) }
         RawEventType::FailedExec { result } => { Ok(EventType::FailedExec { result : *result }) }
-        RawEventType::ChangeWorkingDirectory { new_cwd } => {
-            let cwd_str = normalize_string(strategy, &new_cwd)?;
-            let cwd_path = PathBuf::from(cwd_str);
-            Ok(EventType::ChangeWorkingDirectory { new_cwd : cwd_path })
-        }
         RawEventType::OpenFile { path, flags, mode } => {
             let path_str = normalize_string(strategy, &path)?;
             let p = PathBuf::from(path_str);

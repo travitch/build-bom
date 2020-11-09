@@ -31,8 +31,6 @@ pub enum RawEventType {
     Fork { old_pid : i32, new_pid : i32 },
     Exec { command : RawString, args : Vec<RawString>, cwd : PathBuf, environment : Vec<u8> },
     FailedExec { result : i32 },
-    // FIXME: Don't track this - pull it out of /proc instead for each exec
-    ChangeWorkingDirectory { new_cwd : RawString },
     OpenFile { path : RawString, flags: u32, mode : u32 },
     OpenFileAt { at_dir : i32, path : RawString, flags : u32, mode : u32 },
     OpenFileReturn { result : i32 },
