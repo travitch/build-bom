@@ -52,9 +52,16 @@ These tools act as drop-in replacements that pretend to be your normal compiler 
 
 - Serious polish required
 - Build step dependency analysis for in-order replay
+- Additional tools
+  - Dependency graph analyzer and visualizer
+  - A command to list all targets (or all library targets or all executable targets)
+  - A command to rebuild a target binary with libfuzzer, Address Sanitizer, or Thread Sanitizer
 - Automated granular filename tracking (to precisely model renames)
 - Fix parallel builds
 - Full handling of environment variables
+- Additional normalization policies
+  - Ignore trivial dependencies like ld.so
+  - Add ability to ignore dynamically loaded library dependencies
 - Easier scripting
 - MacOS backend based on Dtrace
 - Windows backend
