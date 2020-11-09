@@ -1,7 +1,7 @@
 use serde_json;
 use rmp_serde;
 use std::collections::BTreeMap;
-use std::io::{Write};
+use std::io::{Read,Write};
 use std::thread;
 use std::fs;
 use byteorder::{NativeEndian, ByteOrder};
@@ -68,7 +68,9 @@ fn trace_events(syscalls : BTreeMap<u64, String>, mut ptracer : Ptracer, mut wri
                 if syscall == "execve" {
                     let bin = read_str_from(&mut tracee, regs.rdi);
                     let args = read_str_list_from(&mut tracee, regs.rsi);
-                    write_event(&mut writer, &mut tracee, RawEventType::Exec { command : bin, args : args })?;
+                    let env = read_environment(&tracee)?;
+                    let cwd = read_cwd(&tracee)?;
+                    write_event(&mut writer, &mut tracee, RawEventType::Exec { command : bin, args : args, environment : env, cwd : cwd })?;
                 } else if syscall == "open" {
                     let path = read_str_from(&mut tracee, regs.rdi);
                     let flags = regs.rsi as u32;
@@ -193,6 +195,7 @@ fn read_str_list_from(tracee: &mut Tracee, addr: u64) -> Vec<RawString> {
 }
 
 fn record_events(file_path : PathBuf, rdr : PipeReader) -> anyhow::Result<()> {
+    // FIXME: Wrap the writer in a compressor (see deflate) since the raw trace is very verbose
     let mut f = fs::File::create(file_path.as_path())?;
     let header = Header { version : CURRENT_VERSION, data_format : DataFormat::Raw };
     serde_json::to_writer(&f, &header)?;
@@ -213,4 +216,35 @@ fn record_events(file_path : PathBuf, rdr : PipeReader) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Read the environment for the paused process
+///
+/// This consults /proc, since there is no easy way to get the information via
+/// ptrace.
+///
+/// In principle, this should not be able to fail...
+///
+/// FIXME: Consider only collecting some relevant variables here
+fn read_environment(tracee : &Tracee) -> anyhow::Result<Vec<u8>> {
+    let tid = tracee.pid.as_raw() as u32;
+    let env_path = format!("/proc/{}/environ", tid);
+    let mut env_file = std::fs::File::open(env_path)?;
+    let mut env = Vec::new();
+    let _num_bytes = env_file.read_to_end(&mut env)?;
+    Ok(env)
+}
+
+/// Read the current working directory of the paused process
+///
+/// This consults /proc, as there is no easy way to get this information
+/// directly with ptrace.
+///
+/// In principle, this should not be able to fail (though it isn't clear to me
+/// that it is impossible to run into encoding issues with `PathBuf`.
+fn read_cwd(tracee : &Tracee) -> anyhow::Result<PathBuf> {
+    let tid = tracee.pid.as_raw() as u32;
+    let cwd_link_path = format!("/proc/{}/cwd", tid);
+    let link_target = std::fs::read_link(cwd_link_path)?;
+    Ok(link_target)
 }

@@ -1,4 +1,6 @@
+use std::path::PathBuf;
 use serde::{Serialize, Deserialize};
+
 
 // We use this type to represent strings read from tracees (foreign processes)
 //
@@ -27,7 +29,7 @@ pub struct RawTraceEvent {
 #[derive (Debug,Serialize,Deserialize)]
 pub enum RawEventType {
     Fork { old_pid : i32, new_pid : i32 },
-    Exec { command : RawString, args : Vec<RawString> },
+    Exec { command : RawString, args : Vec<RawString>, cwd : PathBuf, environment : Vec<u8> },
     FailedExec { result : i32 },
     // FIXME: Don't track this - pull it out of /proc instead for each exec
     ChangeWorkingDirectory { new_cwd : RawString },

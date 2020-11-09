@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::{BufReader,BufRead};
 use std::io::Write;
 use std::fs::File;
@@ -6,7 +7,7 @@ use serde_json;
 
 use crate::bom::options::{NormalizeOptions,NormalizeStrategy};
 use crate::bom::raw::{RawTraceEvent,RawString,RawEventType};
-use crate::bom::event::{EventType,TraceEvent};
+use crate::bom::event::{EventType,TraceEvent,EnvID,Environment};
 use crate::bom::versioning::{Header,DataFormat,CURRENT_VERSION};
 
 /// The command-line entry point for the normalization process
@@ -37,13 +38,23 @@ pub fn normalize_entrypoint(normalize_opts : &NormalizeOptions) -> anyhow::Resul
         raw_events.push(raw_event);
     }
 
-    let trace_events = normalize(&normalize_opts.strategy, raw_events.as_slice())?;
+    let (envs, trace_events) = normalize(&normalize_opts.strategy, raw_events.as_slice())?;
     let out_file = std::fs::File::create(&normalize_opts.output)?;
     let mut buf_out = std::io::BufWriter::new(out_file);
+
+    // Write out our updated header
     let header = Header { version : CURRENT_VERSION, data_format : DataFormat::Normalized };
     serde_json::to_writer(&mut buf_out, &header)?;
     buf_out.write("\n".as_bytes())?;
 
+    // Write out all of the collected (uniquified) environments
+    for (env, envid) in envs {
+        let e = Environment { id : envid, bytes : env };
+        serde_json::to_writer(&mut buf_out, &e)?;
+        buf_out.write("\n".as_bytes())?;
+    }
+
+    // Write out all of our collected events (which refer to the environments above)
     for trace_event in trace_events {
         serde_json::to_writer(&mut buf_out, &trace_event)?;
         buf_out.write("\n".as_bytes())?;
@@ -75,13 +86,22 @@ fn check_version(file_path : &PathBuf, first_line : Option<Result<String, std::i
     }
 }
 
-pub fn normalize(strategy : &NormalizeStrategy, raw_events : &[RawTraceEvent]) -> Result<Vec<TraceEvent>, NormalizationError> {
+/// Normalize a sequence of raw events
+///
+/// It uses the given normalization strategy when interpreting strings that are
+/// not valid UTF-8.
+///
+/// The normalized form of the event trace includes tracking environments on the
+/// side to increase sharing; the returned `HashMap` maps environments to their
+/// unique identifiers.
+pub fn normalize(strategy : &NormalizeStrategy, raw_events : &[RawTraceEvent]) -> Result<(HashMap<Vec<u8>, EnvID>, Vec<TraceEvent>), NormalizationError> {
+    let mut envs = HashMap::new();
     let events = raw_events.iter().try_fold(Vec::new(), |mut acc, re| {
-        let ev = raw_to_event(strategy, &re)?;
+        let ev = raw_to_event(strategy, &mut envs, &re)?;
         acc.push(ev);
         Ok(acc)
-    });
-    events
+    })?;
+    Ok((envs, events))
 }
 
 #[derive(thiserror::Error,Debug)]
@@ -113,7 +133,7 @@ fn normalize_string(strategy : &NormalizeStrategy, rs : &RawString) -> Result<St
     }
 }
 
-fn raw_to_event(strategy : &NormalizeStrategy, raw : &RawTraceEvent) -> Result<TraceEvent, NormalizationError> {
+fn raw_to_event(strategy : &NormalizeStrategy, envs : &mut HashMap<Vec<u8>, EnvID>, raw : &RawTraceEvent) -> Result<TraceEvent, NormalizationError> {
     let new_event = match &raw.evt {
         RawEventType::CloseFile { fd } => { Ok(EventType::CloseFile { fd : *fd }) }
         RawEventType::OpenFileReturn { result } => { Ok(EventType::OpenFileReturn { result : *result }) }
@@ -134,14 +154,22 @@ fn raw_to_event(strategy : &NormalizeStrategy, raw : &RawTraceEvent) -> Result<T
             let p = PathBuf::from(path_str);
             Ok(EventType::OpenFileAt { at_dir : *at_dir, path : p, flags : *flags, mode : *mode })
         }
-        RawEventType::Exec { command, args } => {
+        RawEventType::Exec { command, args, environment, cwd } => {
             let command_str = normalize_string(strategy, &command)?;
             let arg_strs = args.iter().try_fold(Vec::new(), |mut acc, rs| {
                 let str = normalize_string(strategy, &rs)?;
                 acc.push(str);
                 Ok(acc)
             })?;
-            Ok(EventType::Exec { command : command_str, args : arg_strs })
+            let envid = match envs.get(environment) {
+                Some(eid) => { eid.clone() }
+                None => {
+                    let eid = EnvID(envs.len() as u32);
+                    envs.insert(environment.clone(), eid.clone());
+                    eid
+                }
+            };
+            Ok(EventType::Exec { command : command_str, args : arg_strs, cwd : cwd.clone(), environment : envid })
         }
     }?;
 
