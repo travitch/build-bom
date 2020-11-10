@@ -30,7 +30,9 @@ pub struct BitcodeOptions {
     #[structopt(long="dry-run", help="Simulate the build without executing any commands")]
     pub dry_run : bool,
     #[structopt(short="v", long="verbose", help="Generate verbose output")]
-    pub verbose : bool
+    pub verbose : bool,
+    #[structopt(long="llvm-tool-suffix", help="A suffix to add to all llvm tools (usually a version number)")]
+    pub llvm_tool_suffix : Option<String>
 }
 
 #[derive(Debug,StructOpt)]

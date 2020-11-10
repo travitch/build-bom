@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path,PathBuf};
 use std::process::Command;
-use std::ffi::OsString;
+use std::ffi::{OsStr,OsString};
 
 use slab_tree::NodeRef;
 
@@ -26,7 +26,15 @@ fn group_events<E>(events : Vec<TraceEvent<E>>) -> HashMap<i32,Vec<TraceEvent<E>
 }
 
 fn is_terminal_command( command : &str) -> bool {
-    command == "/usr/bin/gcc" || command == "/bin/sh"
+    let cmd_path = Path::new(command);
+    match cmd_path.file_name() {
+        None => { true }
+        Some(cmd_file_name) => {
+            cmd_file_name == "gcc" ||
+                cmd_file_name == "ar" ||
+                command == "/bin/sh"
+        }
+    }
 }
 
 fn debug_tree(n : NodeRef<Task>, level : i32, verbose : bool) {
@@ -88,6 +96,9 @@ fn replay_build(bitcode_options : &BitcodeOptions, n : NodeRef<Task>) {
 
 /// Given a command, modify it to build bitcode (if possible)
 ///
+/// NOTE: this function expects that argv[0] (the program name in the original
+/// exec call) has been stripped off.
+///
 /// We intercept the following commands:
 ///
 /// - gcc -c (-> clang -emit-llvm -c)
@@ -111,11 +122,21 @@ fn build_bitcode(bitcode_options : &BitcodeOptions, command : &str, args : &[Str
     match cmd_path.file_name() {
         None => { return; }
         Some(cmd_file_name) => {
-            if !(cmd_file_name == "gcc" && is_compile_only) {
-                return;
+            if cmd_file_name == "gcc" && is_compile_only {
+                let mut bc_command = OsString::from("clang");
+                match &bitcode_options.clang_path {
+                    None => {}
+                    Some(alt) => {
+                        bc_command = OsString::from(alt);
+                    }
+                }
+                build_bitcode_compile_only(&bc_command, args, cwd);
             }
         }
     }
+}
+
+fn build_bitcode_compile_only(bc_command : &OsStr, args : &[String], cwd : &PathBuf) {
 
     let mut modified_args = Vec::new() as Vec<OsString>;
     modified_args.push(OsString::from("-emit-llvm"));
@@ -125,7 +146,7 @@ fn build_bitcode(bitcode_options : &BitcodeOptions, command : &str, args : &[Str
         if arg == "-o" {
             match it.next() {
                 None => {
-                    println!("No output file in command '{} {:?}'", command, args);
+                    println!("No output file in command '{:?} {:?}'", bc_command, args);
                     return;
                 }
                 Some(target) => {
@@ -134,14 +155,6 @@ fn build_bitcode(bitcode_options : &BitcodeOptions, command : &str, args : &[Str
                     modified_args.push(target_path.into_os_string());
                 }
             }
-        }
-    }
-
-    let mut bc_command = OsString::from("clang");
-    match &bitcode_options.clang_path {
-        None => {}
-        Some(alt) => {
-            bc_command = OsString::from(alt);
         }
     }
 
