@@ -31,6 +31,9 @@ fn is_terminal_command( command : &str) -> bool {
         None => { true }
         Some(cmd_file_name) => {
             cmd_file_name == "gcc" ||
+                cmd_file_name == "g++" ||
+                cmd_file_name == "clang" ||
+                cmd_file_name == "clang++" ||
                 cmd_file_name == "ar" ||
                 command == "/bin/sh"
         }
@@ -122,13 +125,16 @@ fn build_bitcode(bitcode_options : &BitcodeOptions, ft : &mut FileTracker, comma
     match cmd_path.file_name() {
         None => { return; }
         Some(cmd_file_name) => {
-            if cmd_file_name == "gcc" && is_compile_only {
+            if (cmd_file_name == "gcc" || cmd_file_name == "g++" || cmd_file_name == "clang" || cmd_file_name == "clang++") && is_compile_only {
                 let mut bc_command = OsString::from("clang");
                 match &bitcode_options.clang_path {
                     None => {}
                     Some(alt) => {
                         bc_command = OsString::from(alt);
                     }
+                }
+                if cmd_file_name == "g++" || cmd_file_name == "clang++" {
+                    bc_command.push("++")
                 }
                 build_bitcode_compile_only(ft, &bc_command, args, cwd);
             } else if cmd_file_name == "ar" {
