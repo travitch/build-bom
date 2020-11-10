@@ -25,8 +25,6 @@ pub struct BitcodeOptions {
     pub output : PathBuf,
     #[structopt(long="clang", help="Name of the clang binary to use to generate bitcode (default: `clang`)")]
     pub clang_path : Option<PathBuf>,
-    #[structopt(long="llvm-link", help="Name of the llvm-link binary to use to generate bitcode (default: `llvm-link`)")]
-    pub llvm_link_path : Option<PathBuf>,
     #[structopt(long="dry-run", help="Simulate the build without executing any commands")]
     pub dry_run : bool,
     #[structopt(short="v", long="verbose", help="Generate verbose output")]
