@@ -6,3 +6,4 @@ pub mod normalize;
 pub mod versioning;
 pub mod bitcode;
 pub mod loader;
+pub mod deptree;
