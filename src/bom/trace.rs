@@ -1,5 +1,6 @@
 use std::collections::{HashMap,BTreeMap};
 use std::io::{Read,Write};
+use std::ffi::OsString;
 use std::thread;
 use std::fs;
 use std::path::PathBuf;
@@ -20,8 +21,14 @@ pub fn trace_entrypoint(trace_opts : &TraceOptions) -> anyhow::Result<()> {
     let syscalls = load_syscalls();
     let (reader, mut writer) = pipe().unwrap();
     let thread_opts = trace_opts.output.clone();
-
-    let cmd = Command::new(trace_opts.command.clone())?;
+    let (cmd, args) = trace_opts.command.split_at(1);
+    let cmd_path = which::which(OsString::from(&cmd[0]))?;
+    let mut resolved_command = Vec::new();
+    resolved_command.push(String::from(cmd_path.to_str().unwrap()));
+    for a in args {
+        resolved_command.push(String::from(a));
+    }
+    let cmd = Command::new(resolved_command)?;
 
     let mut ptracer = Ptracer::new();
 
