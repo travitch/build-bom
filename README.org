@@ -33,6 +33,18 @@ In the next step, the collected trace is normalized according to some default ru
 
 In the third step, the trace is analyzed and partially replayed to build LLVM bitcode from the project.  The resulting bitcode is suitable for analysis or verification, as desired.
 
+** Bitcode Generation Options
+
+The ~bitcode~ command has a number of options that may be useful in various contexts.
+
+- ~--dry-run~: Replays the build without taking action
+- ~--clang~: Specify the full name (or path if desired) of a clang binary to use
+- ~--llvm-tool-suffix~: Specify a suffix to be appended to all LLVM command line tool names (e.g., ~llvm-ar~); this is useful if LLVM commands are versioned on your system
+
+#+BEGIN_SRC
+--llvm-tool-suffix=-9
+#+END_SRC
+
 * Design
 
 The tool uses low-level operating system services to observe builds and record their actions.  On Linux, it uses ~ptrace~ to record all relevant system calls into a log.  The tracing is designed to capture all of the information necessary to replay a build.  It currently doesn't capture everything (especially file move and directory operations), but will be extended as-needed.  Beyond system calls, it also captures the environment and working directory of each executed command.
