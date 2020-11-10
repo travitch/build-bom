@@ -3,38 +3,39 @@ use std::path::{Path,PathBuf};
 use std::process::Command;
 
 use crate::bom::options::{BitcodeOptions,StringNormalizeStrategy,Normalization};
-use crate::bom::loader::{LoadedTrace,load_trace};
+use crate::bom::loader::{SomeLoadedTrace,load_trace};
 use crate::bom::normalize::normalize;
-use crate::bom::event::EventType;
+use crate::bom::event::{EventType,TraceEvent};
+
+fn group_events<E>(events : Vec<TraceEvent<E>>) -> HashMap<i32,Vec<TraceEvent<E>>> {
+    let mut groups = HashMap::new();
+    for evt in events {
+        match groups.get(&evt.pid) {
+            Some(_) => {}
+            None => { groups.insert(evt.pid, Vec::new()); }
+        }
+        let task_vec = groups.get_mut(&evt.pid).unwrap();
+        task_vec.push(evt);
+    }
+
+    groups
+}
 
 pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<()> {
     let loaded_trace = load_trace(&bitcode_options.input)?;
     // Handle either raw events (normalize them first) or pre-normalized events (that have to be grouped)
     let (_env, event_groups) = match loaded_trace {
-        LoadedTrace::RawTrace(raw_events) => {
+        SomeLoadedTrace::RawTrace(raw_trace) => {
             let mut normalizations = Vec::new();
             normalizations.push(Normalization::ElideClose);
             normalizations.push(Normalization::ElideFailedOpen);
             normalizations.push(Normalization::ElideFailedExec);
-            let (env0, events) = normalize(&StringNormalizeStrategy::Strict, &normalizations, raw_events.as_slice())?;
-            let mut env = HashMap::new();
-            for (bytes, envid) in env0 {
-                env.insert(envid, bytes);
-            }
-
-            (env, events)
+            let events = normalize(&StringNormalizeStrategy::Strict, &normalizations, raw_trace.events.as_slice())?;
+            (raw_trace.environments, events)
         }
-        LoadedTrace::NormalizedTrace(env, events) => {
-            let mut groups = HashMap::new();
-            for evt in events {
-                match groups.get(&evt.pid) {
-                    Some(_) => {}
-                    None => { groups.insert(evt.pid, Vec::new()); }
-                }
-                let task_vec = groups.get_mut(&evt.pid).unwrap();
-                task_vec.push(evt);
-            }
-            (env, groups)
+        SomeLoadedTrace::NormalizedTrace(loaded_trace) => {
+            let groups = group_events(loaded_trace.events);
+            (loaded_trace.environments, groups)
         }
     };
 

@@ -11,7 +11,8 @@ pub enum DataFormat {
 #[derive(Debug,Serialize,Deserialize)]
 pub struct Header {
     pub version : u32,
-    pub data_format : DataFormat
+    pub data_format : DataFormat,
+    pub root_task : i32
 }
 
 pub const CURRENT_VERSION : u32 = 0;

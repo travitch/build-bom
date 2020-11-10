@@ -4,10 +4,9 @@ use std::path::PathBuf;
 use serde_json;
 
 use crate::bom::options::{NormalizeOptions,StringNormalizeStrategy,Normalization};
-use crate::bom::raw::{RawTraceEvent,RawString,RawEventType};
-use crate::bom::event::{EventType,TraceEvent,EnvID,Environment};
+use crate::bom::event::{EventType,TraceEvent,EnvID,Environment,RawEventType,RawString};
 use crate::bom::versioning::{Header,DataFormat,CURRENT_VERSION};
-use crate::bom::loader::{load_trace,LoadedTrace};
+use crate::bom::loader::{load_trace,SomeLoadedTrace};
 
 /// The command-line entry point for the normalization process
 ///
@@ -27,7 +26,7 @@ pub fn normalize_entrypoint(normalize_opts : &NormalizeOptions) -> anyhow::Resul
     let loaded_trace = load_trace(&normalize_opts.input)?;
 
     match loaded_trace {
-        LoadedTrace::RawTrace(raw_events) => {
+        SomeLoadedTrace::RawTrace(raw_trace) => {
             let mut normalizations = Vec::new();
             if normalize_opts.all_normalizations {
                 normalizations.push(Normalization::ElideClose);
@@ -39,17 +38,17 @@ pub fn normalize_entrypoint(normalize_opts : &NormalizeOptions) -> anyhow::Resul
                 }
             }
 
-            let (envs, grouped_trace_events) = normalize(&normalize_opts.strategy, &normalizations, raw_events.as_slice())?;
+            let grouped_trace_events = normalize(&normalize_opts.strategy, &normalizations, raw_trace.events.as_slice())?;
             let out_file = std::fs::File::create(&normalize_opts.output)?;
             let mut buf_out = std::io::BufWriter::new(out_file);
 
             // Write out our updated header
-            let header = Header { version : CURRENT_VERSION, data_format : DataFormat::Normalized };
+            let header = Header { version : CURRENT_VERSION, data_format : DataFormat::Normalized, root_task : raw_trace.root_task };
             serde_json::to_writer(&mut buf_out, &header)?;
             buf_out.write("\n".as_bytes())?;
 
             // Write out all of the collected (uniquified) environments
-            for (env, envid) in envs {
+            for (envid, env) in raw_trace.environments {
                 let e = Environment { id : envid, bytes : env };
                 serde_json::to_writer(&mut buf_out, &e)?;
                 buf_out.write("\n".as_bytes())?;
@@ -64,7 +63,7 @@ pub fn normalize_entrypoint(normalize_opts : &NormalizeOptions) -> anyhow::Resul
             }
 
         }
-        LoadedTrace::NormalizedTrace(_,_) => {
+        SomeLoadedTrace::NormalizedTrace(_) => {
             println!("Input file {:?} is already normalized", &normalize_opts.input);
         }
     }
@@ -81,10 +80,9 @@ pub fn normalize_entrypoint(normalize_opts : &NormalizeOptions) -> anyhow::Resul
 /// The normalized form of the event trace includes tracking environments on the
 /// side to increase sharing; the returned `HashMap` maps environments to their
 /// unique identifiers.
-pub fn normalize(strategy : &StringNormalizeStrategy, normalizations : &[Normalization], raw_events : &[RawTraceEvent]) -> Result<(HashMap<Vec<u8>, EnvID>, HashMap<i32, Vec<TraceEvent>>), NormalizationError> {
-    let mut envs = HashMap::new();
+pub fn normalize(strategy : &StringNormalizeStrategy, normalizations : &[Normalization], raw_events : &[TraceEvent<RawEventType<EnvID>>]) -> Result<HashMap<i32, Vec<TraceEvent<EventType>>>, NormalizationError> {
     let events = raw_events.iter().try_fold(Vec::new(), |mut acc, re| {
-        let ev = raw_to_event(strategy, &mut envs, &re)?;
+        let ev = raw_to_event(strategy, &re)?;
         acc.push(ev);
         Ok(acc)
     })?;
@@ -122,12 +120,12 @@ pub fn normalize(strategy : &StringNormalizeStrategy, normalizations : &[Normali
         normed_groups.insert(*event_id, normed);
     }
 
-    Ok((envs, normed_groups))
+    Ok(normed_groups)
 }
 
-fn apply_normalizations<'a>(normalizations : &'a [Normalization], event_trace : &'a [TraceEvent]) -> Vec<TraceEvent> {
+fn apply_normalizations<'a>(normalizations : &'a [Normalization], event_trace : &'a [TraceEvent<EventType>]) -> Vec<TraceEvent<EventType>> {
     let mut res = Vec::new();
-    let initial_it = Box::new(event_trace.iter()) as Box<dyn Iterator<Item=&'a TraceEvent> + 'a>;
+    let initial_it = Box::new(event_trace.iter()) as Box<dyn Iterator<Item=&'a TraceEvent<EventType>> + 'a>;
     let mut it = normalizations.iter().fold(initial_it, add_normalization_iterator);
     while let Some(evt_ref) = it.next() {
         res.push(evt_ref.clone());
@@ -136,26 +134,26 @@ fn apply_normalizations<'a>(normalizations : &'a [Normalization], event_trace : 
     res
 }
 
-fn add_normalization_iterator<'a>(iter : Box<dyn Iterator<Item=&'a TraceEvent> + 'a>, norm : &Normalization) -> Box<dyn Iterator<Item=&'a TraceEvent> + 'a> {
+fn add_normalization_iterator<'a>(iter : Box<dyn Iterator<Item=&'a TraceEvent<EventType>> + 'a>, norm : &Normalization) -> Box<dyn Iterator<Item=&'a TraceEvent<EventType>> + 'a> {
     match norm {
         Normalization::ElideClose => { Box::new(iter.filter(|evt| !is_close_event(evt))) }
         Normalization::ElideFailedOpen => {
-            let piter = iter.peekable() as std::iter::Peekable<Box<dyn Iterator<Item=&'a TraceEvent>>>;
+            let piter = iter.peekable() as std::iter::Peekable<Box<dyn Iterator<Item=&'a TraceEvent<EventType>>>>;
             Box::new(elide_failed_open(piter))
         }
         Normalization::ElideFailedExec => {
-            let piter = iter.peekable() as std::iter::Peekable<Box<dyn Iterator<Item=&'a TraceEvent>>>;
+            let piter = iter.peekable() as std::iter::Peekable<Box<dyn Iterator<Item=&'a TraceEvent<EventType>>>>;
             Box::new(elide_failed_exec(piter))
         }
     }
 }
 
 struct ElideFailedOpen<'a> {
-    base : std::iter::Peekable<Box<dyn Iterator<Item=&'a TraceEvent> + 'a>>
+    base : std::iter::Peekable<Box<dyn Iterator<Item=&'a TraceEvent<EventType>> + 'a>>
 }
 
 impl <'a> Iterator for ElideFailedOpen<'a> {
-    type Item = &'a TraceEvent;
+    type Item = &'a TraceEvent<EventType>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
@@ -189,16 +187,16 @@ impl <'a> Iterator for ElideFailedOpen<'a> {
     }
 }
 
-fn elide_failed_open<'a>(it : std::iter::Peekable<Box<dyn Iterator<Item=&'a TraceEvent> + 'a>>) -> ElideFailedOpen<'a> {
+fn elide_failed_open<'a>(it : std::iter::Peekable<Box<dyn Iterator<Item=&'a TraceEvent<EventType>> + 'a>>) -> ElideFailedOpen<'a> {
     ElideFailedOpen { base : it }
 }
 
 struct ElideFailedExec<'a> {
-    base : std::iter::Peekable<Box<dyn Iterator<Item=&'a TraceEvent> + 'a>>
+    base : std::iter::Peekable<Box<dyn Iterator<Item=&'a TraceEvent<EventType>> + 'a>>
 }
 
 impl <'a> Iterator for ElideFailedExec<'a> {
-    type Item = &'a TraceEvent;
+    type Item = &'a TraceEvent<EventType>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
@@ -226,12 +224,12 @@ impl <'a> Iterator for ElideFailedExec<'a> {
     }
 }
 
-fn elide_failed_exec<'a>(it : std::iter::Peekable<Box<dyn Iterator<Item=&'a TraceEvent> + 'a>>) -> ElideFailedExec<'a> {
+fn elide_failed_exec<'a>(it : std::iter::Peekable<Box<dyn Iterator<Item=&'a TraceEvent<EventType>> + 'a>>) -> ElideFailedExec<'a> {
     ElideFailedExec { base : it }
 }
 
 
-fn is_close_event(trace_event : &TraceEvent) -> bool {
+fn is_close_event(trace_event : &TraceEvent<EventType>) -> bool {
     match trace_event.evt {
         EventType::CloseFile { .. } => { true }
         _ => { false }
@@ -259,7 +257,7 @@ fn normalize_string(strategy : &StringNormalizeStrategy, rs : &RawString) -> Res
     }
 }
 
-fn raw_to_event(strategy : &StringNormalizeStrategy, envs : &mut HashMap<Vec<u8>, EnvID>, raw : &RawTraceEvent) -> Result<TraceEvent, NormalizationError> {
+fn raw_to_event(strategy : &StringNormalizeStrategy, raw : &TraceEvent<RawEventType<EnvID>>) -> Result<TraceEvent<EventType>, NormalizationError> {
     let new_event = match &raw.evt {
         RawEventType::Exit { pid, exit_code } => { Ok(EventType::Exit { pid : *pid, exit_code : *exit_code }) }
         RawEventType::CloseFile { fd } => { Ok(EventType::CloseFile { fd : *fd }) }
@@ -283,15 +281,7 @@ fn raw_to_event(strategy : &StringNormalizeStrategy, envs : &mut HashMap<Vec<u8>
                 acc.push(str);
                 Ok(acc)
             })?;
-            let envid = match envs.get(environment) {
-                Some(eid) => { eid.clone() }
-                None => {
-                    let eid = EnvID(envs.len() as u32);
-                    envs.insert(environment.clone(), eid.clone());
-                    eid
-                }
-            };
-            Ok(EventType::Exec { command : command_str, args : arg_strs, cwd : cwd.clone(), environment : envid })
+            Ok(EventType::Exec { command : command_str, args : arg_strs, cwd : cwd.clone(), environment : *environment })
         }
     }?;
 

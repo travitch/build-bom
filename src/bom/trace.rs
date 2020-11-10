@@ -1,17 +1,17 @@
-use serde_json;
-use rmp_serde;
-use std::collections::BTreeMap;
+use std::collections::{HashMap,BTreeMap};
 use std::io::{Read,Write};
 use std::thread;
 use std::fs;
+use std::path::PathBuf;
+use std::mem::{size_of};
+use serde_json;
+use rmp_serde;
 use byteorder::{NativeEndian, ByteOrder};
 use os_pipe::{pipe,PipeReader,PipeWriter};
 use core::borrow::Borrow;
-use std::mem::{size_of};
 use pete::{Command, Ptracer, Restart, Stop, Tracee};
-use std::path::PathBuf;
 
-use crate::bom::raw::{RawString,RawEventType,RawTraceEvent};
+use crate::bom::event::{RawString,RawEventType,TraceEvent,EnvID,Environment};
 use crate::bom::syscalls::{load_syscalls};
 use crate::bom::options::{TraceOptions};
 use crate::bom::versioning::{Header,DataFormat,CURRENT_VERSION};
@@ -32,7 +32,8 @@ pub fn trace_entrypoint(trace_opts : &TraceOptions) -> anyhow::Result<()> {
             println!("Error spawning tracee {}", e);
         }
         Ok(tracee1) => {
-            let event_reader = thread::spawn(move || { record_events(thread_opts, reader) });
+            let root_pid = tracee1.pid.as_raw();
+            let event_reader = thread::spawn(move || { record_events(thread_opts, reader, root_pid) });
             ptracer.restart(tracee1, Restart::Syscall)?;
             let subprocess_writer = writer.try_clone()?;
             trace_events(syscalls, ptracer, subprocess_writer)?;
@@ -41,7 +42,7 @@ pub fn trace_entrypoint(trace_opts : &TraceOptions) -> anyhow::Result<()> {
             // children).
             //
             // We signal the serializer thread by writing a `None` to the stream
-            let bytes = rmp_serde::encode::to_vec::<Option<RawTraceEvent>>(&None)?;
+            let bytes = rmp_serde::encode::to_vec::<Option<TraceEvent<RawEventType<EnvID>>>>(&None)?;
             writer.write(bytes.as_slice())?;
 
             // Wait for the reader thread to finish
@@ -130,8 +131,8 @@ fn trace_events(syscalls : BTreeMap<u64, String>, mut ptracer : Ptracer, mut wri
     Ok(())
 }
 
-fn write_event(writer : &mut PipeWriter, tracee : &mut Tracee, evt : RawEventType) -> anyhow::Result<()> {
-    let te = Some(RawTraceEvent { pid : tracee.pid.as_raw(), evt : evt });
+fn write_event(writer : &mut PipeWriter, tracee : &mut Tracee, evt : RawEventType<Vec<u8>>) -> anyhow::Result<()> {
+    let te = Some(TraceEvent { pid : tracee.pid.as_raw(), evt : evt });
     let bytes = rmp_serde::encode::to_vec(&te)?;
     writer.write(bytes.as_slice())?;
     Ok(())
@@ -194,10 +195,10 @@ fn read_str_list_from(tracee: &mut Tracee, addr: u64) -> Vec<RawString> {
     res
 }
 
-fn record_events(file_path : PathBuf, rdr : PipeReader) -> anyhow::Result<()> {
-    // FIXME: Wrap the writer in a compressor (see deflate) since the raw trace is very verbose
+fn record_events(file_path : PathBuf, rdr : PipeReader, root_pid : i32) -> anyhow::Result<()> {
+    let mut envs = HashMap::new();
     let mut f = fs::File::create(file_path.as_path())?;
-    let header = Header { version : CURRENT_VERSION, data_format : DataFormat::Raw };
+    let header = Header { version : CURRENT_VERSION, data_format : DataFormat::Raw, root_task : root_pid };
     serde_json::to_writer(&f, &header)?;
     f.write("\n".as_bytes())?;
 
@@ -205,18 +206,45 @@ fn record_events(file_path : PathBuf, rdr : PipeReader) -> anyhow::Result<()> {
     // reading off of a (OS) pipe and have no idea how much data we will
     // receive.
     loop {
-        match rmp_serde::decode::from_read::<_, Option<RawTraceEvent>>(rdr.borrow()) {
+        match rmp_serde::decode::from_read::<_, Option<TraceEvent<RawEventType<Vec<u8>>>>>(rdr.borrow()) {
             Err(e) => { println!("Error recording event: {}", e) }
             Ok(None) => { break; }
             Ok(Some(trace_event)) => {
-                // println!("Event: {:?}", trace_event);
-                serde_json::to_writer(&f, &trace_event)?;
-                f.write("\n".as_bytes())?;
+                // If we get an exec with its full environment inlined, start
+                // deduping environments in a local hash map (writing them out
+                // as we encounter them for the first time)
+                //
+                // Write out a more compact Exec that only refers to an EnvID
+                match trace_event.evt {
+                    RawEventType::Exec { command, args, cwd, environment } => {
+                        let env_id = match envs.get(&environment) {
+                            Some(env_id) => { *env_id }
+                            None => {
+                                let env_id = EnvID(envs.len() as u32);
+                                envs.insert(environment.clone(), env_id);
+                                let env = Environment { id : env_id, bytes : environment };
+                                serde_json::to_writer(&f, &env)?;
+                                f.write("\n".as_bytes())?;
+                                env_id
+                            }
+                        };
+
+                        let ex = RawEventType::Exec { command : command, args : args, cwd : cwd, environment : env_id };
+                        let trace_event1 = TraceEvent { pid : trace_event.pid, evt : ex };
+                        serde_json::to_writer(&f, &trace_event1)?;
+                        f.write("\n".as_bytes())?;
+                    }
+                    _ => {
+                        serde_json::to_writer(&f, &trace_event)?;
+                        f.write("\n".as_bytes())?;
+                    }
+                }
             }
         }
     }
     Ok(())
 }
+
 
 /// Read the environment for the paused process
 ///
