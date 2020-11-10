@@ -105,11 +105,11 @@ fn replay_build(bitcode_options : &BitcodeOptions, ft : &mut FileTracker, n : No
 /// We intercept the following commands:
 ///
 /// - gcc -c (-> clang -emit-llvm -c)
+/// - g++ -c (-> clang++ -emit-llvm -c)
 /// - ar (-> llvm-ar)
 ///
 /// TODO:
 ///
-/// - g++ -c (-> clang++ -emit-llvm -c)
 /// - ld (-> llvm-link)
 /// - gcc (-> llvm-link)
 /// - g++ (-> llvm-link)
