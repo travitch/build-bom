@@ -25,7 +25,9 @@ pub enum EventType {
     OpenFile { path : PathBuf, flags : u32, mode : u32 },
     OpenFileAt { at_dir : i32, path : PathBuf, flags : u32, mode : u32 },
     OpenFileReturn { result : i32 },
-    CloseFile { fd : i32 }
+    CloseFile { fd : i32 },
+    Rename { from : String, to : String },
+    RenameAt { from_dir : i32, from : String, to_dir : i32, to : String }
 }
 
 /// FIXME: Track renames (and potentially copies)
@@ -38,7 +40,9 @@ pub enum RawEventType<E> {
     OpenFile { path : RawString, flags: u32, mode : u32 },
     OpenFileAt { at_dir : i32, path : RawString, flags : u32, mode : u32 },
     OpenFileReturn { result : i32 },
-    CloseFile { fd : i32 }
+    CloseFile { fd : i32 },
+    Rename { from : RawString, to : RawString },
+    RenameAt { from_dir : i32, from : RawString, to_dir : i32, to : RawString }
 }
 
 #[derive(Debug,Clone,Hash,Eq,Ord,PartialEq,PartialOrd,Serialize,Deserialize)]

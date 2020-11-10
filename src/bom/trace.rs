@@ -89,6 +89,16 @@ fn trace_events(syscalls : BTreeMap<u64, String>, mut ptracer : Ptracer, mut wri
                 } else if syscall == "close" {
                     let fd = regs.rdi as i32;
                     write_event(&mut writer, &mut tracee, RawEventType::CloseFile { fd : fd })?;
+                } else if syscall == "rename" {
+                    let from = read_str_from(&mut tracee, regs.rdi);
+                    let to = read_str_from(&mut tracee, regs.rsi);
+                    write_event(&mut writer, &mut tracee, RawEventType::Rename { from : from, to : to })?;
+                } else if syscall == "renameat" {
+                    let from_fd = regs.rdi as i32;
+                    let from = read_str_from(&mut tracee, regs.rsi);
+                    let to_fd = regs.rdx as i32;
+                    let to = read_str_from(&mut tracee, regs.r10);
+                    write_event(&mut writer, &mut tracee, RawEventType::RenameAt { from_dir : from_fd, from : from, to_dir : to_fd, to : to })?;
                 } else {
                     // println!("{:>16x}: [{}], {:?}", pc, syscall, tracee.stop);
                 };

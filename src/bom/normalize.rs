@@ -264,6 +264,16 @@ fn raw_to_event(strategy : &StringNormalizeStrategy, raw : &TraceEvent<RawEventT
         RawEventType::OpenFileReturn { result } => { Ok(EventType::OpenFileReturn { result : *result }) }
         RawEventType::Fork { old_pid, new_pid } => { Ok(EventType::Fork { old_pid : *old_pid, new_pid : *new_pid }) }
         RawEventType::FailedExec { result } => { Ok(EventType::FailedExec { result : *result }) }
+        RawEventType::Rename { from, to } => {
+            let from_str = normalize_string(strategy, &from)?;
+            let to_str = normalize_string(strategy, &to)?;
+            Ok(EventType::Rename { from : from_str, to : to_str })
+        }
+        RawEventType::RenameAt { from, to, from_dir, to_dir } => {
+            let from_str = normalize_string(strategy, &from)?;
+            let to_str = normalize_string(strategy, &to)?;
+            Ok(EventType::RenameAt { from : from_str, to : to_str, from_dir : *from_dir, to_dir : *to_dir })
+        }
         RawEventType::OpenFile { path, flags, mode } => {
             let path_str = normalize_string(strategy, &path)?;
             let p = PathBuf::from(path_str);
