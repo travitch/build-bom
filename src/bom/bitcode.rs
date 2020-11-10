@@ -66,7 +66,7 @@ fn debug_tree(n : NodeRef<Task>, level : i32, verbose : bool) {
 }
 
 /// Replay a build exactly, invoking "shadow" commands to build bitcode where necessary
-fn replay_build(bitcode_options : &BitcodeOptions, n : NodeRef<Task>) {
+fn replay_build(bitcode_options : &BitcodeOptions, ft : &mut FileTracker, n : NodeRef<Task>) {
     let mut is_terminal = false;
     for evt in &n.data().task_events {
         match &evt.evt {
@@ -81,7 +81,7 @@ fn replay_build(bitcode_options : &BitcodeOptions, n : NodeRef<Task>) {
                         let _rc = child.wait();
                     }
                 }
-                build_bitcode(bitcode_options, command, rest_args, cwd);
+                build_bitcode(bitcode_options, ft, command, rest_args, cwd);
             }
             _ => {}
         }
@@ -89,7 +89,7 @@ fn replay_build(bitcode_options : &BitcodeOptions, n : NodeRef<Task>) {
 
     if !is_terminal {
         for c in n.children() {
-            replay_build(bitcode_options, c);
+            replay_build(bitcode_options, ft, c);
         }
     }
 }
@@ -102,15 +102,15 @@ fn replay_build(bitcode_options : &BitcodeOptions, n : NodeRef<Task>) {
 /// We intercept the following commands:
 ///
 /// - gcc -c (-> clang -emit-llvm -c)
+/// - ar (-> llvm-ar)
 ///
 /// TODO:
 ///
 /// - g++ -c (-> clang++ -emit-llvm -c)
-/// - ar (-> llvm-ar)
 /// - ld (-> llvm-link)
 /// - gcc (-> llvm-link)
 /// - g++ (-> llvm-link)
-fn build_bitcode(bitcode_options : &BitcodeOptions, command : &str, args : &[String], cwd : &PathBuf) {
+fn build_bitcode(bitcode_options : &BitcodeOptions, ft : &mut FileTracker, command : &str, args : &[String], cwd : &PathBuf) {
     let mut is_compile_only = false;
     for arg in args {
         if arg == "-c" {
@@ -130,14 +130,69 @@ fn build_bitcode(bitcode_options : &BitcodeOptions, command : &str, args : &[Str
                         bc_command = OsString::from(alt);
                     }
                 }
-                build_bitcode_compile_only(&bc_command, args, cwd);
+                build_bitcode_compile_only(ft, &bc_command, args, cwd);
+            } else if cmd_file_name == "ar" {
+                let mut ar_command = OsString::from("llvm-ar");
+                match &bitcode_options.llvm_tool_suffix {
+                    None => {}
+                    Some(suffix) => {
+                        ar_command.push(suffix);
+                    }
+                }
+                build_bitcode_archive(ft, &ar_command, args, cwd);
             }
         }
     }
 }
 
-fn build_bitcode_compile_only(bc_command : &OsStr, args : &[String], cwd : &PathBuf) {
+fn build_bitcode_archive(ft : &mut FileTracker, ar_command : &OsStr, args : &[String], cwd : &PathBuf) {
+    // /usr/bin/ar ["rc", "libz.a", "adler32.o", "crc32.o",
+    let mut modified_args = Vec::new() as Vec<OsString>;
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        let p = Path::new(arg);
+        if is_archive(p) {
+            let mut pb = p.to_path_buf();
+            pb.set_extension("bca");
+            modified_args.push(OsString::from(pb.clone()));
+            add_file_mapping(ft, OsString::from(p.clone()), OsString::from(pb.clone()));
+        } else if is_object(p) {
+            match get_file_mapping(ft, p.as_os_str()) {
+                None => {
+                    println!("No object mapping for file {:?}", p);
+                    modified_args.push(OsString::from(p));
+                }
+                Some(bc_file) => {
+                    modified_args.push(OsString::from(bc_file));
+                }
+            }
+        } else {
+            modified_args.push(OsString::from(arg));
+        }
+    }
 
+    match Command::new(&ar_command).args(&modified_args).current_dir(cwd).spawn() {
+        Err(msg) => {
+            println!("Error while spaning command '{:?} {:?}' : {}", &ar_command, &modified_args, msg);
+            return;
+        }
+        Ok(mut child) => {
+            let _rc = child.wait();
+        }
+    }
+}
+
+fn is_archive(p : &Path) -> bool {
+    p.extension().map_or(false, |e| e == "a")
+}
+
+fn is_object(p : &Path) -> bool {
+    p.extension().map_or(false, |e| e == "o")
+}
+
+fn build_bitcode_compile_only(ft : &mut FileTracker, bc_command : &OsStr, args : &[String], cwd : &PathBuf) {
+    let mut orig_target = OsString::from("");
+    let mut new_target = OsString::from("");
     let mut modified_args = Vec::new() as Vec<OsString>;
     modified_args.push(OsString::from("-emit-llvm"));
     let mut it = args.iter();
@@ -150,8 +205,10 @@ fn build_bitcode_compile_only(bc_command : &OsStr, args : &[String], cwd : &Path
                     return;
                 }
                 Some(target) => {
+                    orig_target = PathBuf::from(&target).into_os_string();
                     let mut target_path = PathBuf::from(&target);
                     target_path.set_extension("bc");
+                    new_target = OsString::from(target_path.clone());
                     modified_args.push(target_path.into_os_string());
                 }
             }
@@ -159,9 +216,13 @@ fn build_bitcode_compile_only(bc_command : &OsStr, args : &[String], cwd : &Path
     }
 
     match Command::new(&bc_command).args(&modified_args).current_dir(cwd).spawn() {
-        Err(msg) => { println!("Error while spawning command '{:?} {:?}': {}", &bc_command, &modified_args, msg) }
+        Err(msg) => {
+            println!("Error while spawning command '{:?} {:?}': {}", &bc_command, &modified_args, msg);
+            return;
+        }
         Ok(mut child) => {
             let _rc = child.wait();
+            add_file_mapping(ft, orig_target, new_target);
         }
     }
 }
@@ -188,15 +249,34 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<(
     if bitcode_options.dry_run {
         debug_tree(t.root().unwrap(), 0, bitcode_options.verbose);
     } else {
+        let mut ft = new();
         // Iterate over all of the children of the root.  We skip the root
         // because it is the invocation of the build command (which we are
         // emulating and would rather not run again).
         let root = t.root().unwrap();
         for c in root.children() {
-            replay_build(bitcode_options, c);
+            replay_build(bitcode_options, &mut ft, c);
         }
     }
 
     Ok(())
 }
 
+/// A data structure for tracking the bitcode files generated (and the files
+/// that they map to in the original build)
+struct FileTracker {
+    bitcode : HashMap<OsString,OsString>
+}
+
+fn new() -> FileTracker {
+    let hm = HashMap::new();
+    FileTracker { bitcode : hm }
+}
+
+fn add_file_mapping(ft : &mut FileTracker, orig_file : OsString, new_file : OsString) {
+    ft.bitcode.insert(orig_file, new_file);
+}
+
+fn get_file_mapping<'a>(ft : &'a FileTracker, orig_file : &OsStr) -> Option<&'a OsString>{
+    ft.bitcode.get(orig_file)
+}
