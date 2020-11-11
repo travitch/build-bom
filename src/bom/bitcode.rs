@@ -76,15 +76,31 @@ fn replay_build(bitcode_options : &BitcodeOptions, ft : &mut FileTracker, n : No
             EventType::Exec { command, args, cwd, .. } => {
                 is_terminal = is_terminal_command(command) || is_terminal;
 
-                let (_, rest_args) = args.split_at(1);
-                println!("{} {:?} @ {:?}", command, rest_args, cwd);
-                match Command::new(command).args(rest_args).current_dir(cwd).spawn() {
-                    Err(msg) => { println!("Error while spawning command '{:?}': {}", command, msg) }
-                    Ok(mut child) => {
-                        let _rc = child.wait();
+                let cmd_path = Path::new(command);
+                match cmd_path.file_name() {
+                    None => {
+                        // Can't exec something with no command...
+                    }
+                    Some(cmd_file_name) => {
+                        // We run the command as long as it is not a recursive make invocation
+                        //
+                        // We already have the commands that make will invoke,
+                        // so there is no need to re-run make.
+                        //
+                        // FIXME: More generally: we want to skip re-running any build systems
+                        if cmd_file_name != "make" && cmd_file_name != "gmake" {
+                            let (_, rest_args) = args.split_at(1);
+                            println!("{} {:?} @ {:?}", command, rest_args, cwd);
+                            match Command::new(command).args(rest_args).current_dir(cwd).spawn() {
+                                Err(msg) => { println!("Error while spawning command '{:?}': {}", command, msg) }
+                                Ok(mut child) => {
+                                    let _rc = child.wait();
+                                }
+                            }
+                            build_bitcode(bitcode_options, ft, command, rest_args, cwd);
+                        }
                     }
                 }
-                build_bitcode(bitcode_options, ft, command, rest_args, cwd);
             }
             _ => {}
         }
