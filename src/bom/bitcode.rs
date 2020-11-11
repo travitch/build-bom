@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::path::{Path,PathBuf};
+use std::io::Read;
 use std::process::Command;
 use std::ffi::{OsStr,OsString};
 
+use sha2::{Digest,Sha256};
 use slab_tree::NodeRef;
 
 use crate::bom::options::{BitcodeOptions,StringNormalizeStrategy,Normalization};
@@ -97,7 +99,12 @@ fn replay_build(bitcode_options : &BitcodeOptions, ft : &mut FileTracker, n : No
                                     let _rc = child.wait();
                                 }
                             }
-                            build_bitcode(bitcode_options, ft, command, rest_args, cwd);
+                            match build_bitcode(bitcode_options, ft, command, rest_args, cwd.as_path()) {
+                                Ok(_) => {}
+                                Err(msg) => {
+                                    println!("Error building bitcode: {:?}", msg);
+                                }
+                            }
                         }
                     }
                 }
@@ -129,7 +136,8 @@ fn replay_build(bitcode_options : &BitcodeOptions, ft : &mut FileTracker, n : No
 /// - ld (-> llvm-link)
 /// - gcc (-> llvm-link)
 /// - g++ (-> llvm-link)
-fn build_bitcode(bitcode_options : &BitcodeOptions, ft : &mut FileTracker, command : &str, args : &[String], cwd : &PathBuf) {
+/// - as (-> llvm-as)
+fn build_bitcode(bitcode_options : &BitcodeOptions, ft : &mut FileTracker, command : &str, args : &[String], cwd : &Path) -> anyhow::Result<()> {
     let mut is_compile_only = false;
     for arg in args {
         if arg == "-c" {
@@ -139,7 +147,12 @@ fn build_bitcode(bitcode_options : &BitcodeOptions, ft : &mut FileTracker, comma
 
     let cmd_path = Path::new(command);
     match cmd_path.file_name() {
-        None => { return; }
+        None => {
+            // This should probably be impossible (or it was a broken exec of a directory)
+            //
+            // No reason to panic...
+            Ok(())
+        }
         Some(cmd_file_name) => {
             if (cmd_file_name == "gcc" || cmd_file_name == "g++" || cmd_file_name == "clang" || cmd_file_name == "clang++") && is_compile_only {
                 let mut bc_command = OsString::from("clang");
@@ -152,7 +165,7 @@ fn build_bitcode(bitcode_options : &BitcodeOptions, ft : &mut FileTracker, comma
                 if cmd_file_name == "g++" || cmd_file_name == "clang++" {
                     bc_command.push("++")
                 }
-                build_bitcode_compile_only(ft, &bc_command, args, cwd);
+                build_bitcode_compile_only(ft, &bc_command, args, cwd)?;
             } else if cmd_file_name == "ar" {
                 let mut ar_command = OsString::from("llvm-ar");
                 match &bitcode_options.llvm_tool_suffix {
@@ -163,11 +176,12 @@ fn build_bitcode(bitcode_options : &BitcodeOptions, ft : &mut FileTracker, comma
                 }
                 build_bitcode_archive(ft, &ar_command, args, cwd);
             }
+            Ok(())
         }
     }
 }
 
-fn build_bitcode_archive(ft : &mut FileTracker, ar_command : &OsStr, args : &[String], cwd : &PathBuf) {
+fn build_bitcode_archive(ft : &mut FileTracker, ar_command : &OsStr, args : &[String], cwd : &Path) {
     // /usr/bin/ar ["rc", "libz.a", "adler32.o", "crc32.o",
     let mut modified_args = Vec::new() as Vec<OsString>;
     let mut it = args.iter();
@@ -195,7 +209,7 @@ fn build_bitcode_archive(ft : &mut FileTracker, ar_command : &OsStr, args : &[St
 
     match Command::new(&ar_command).args(&modified_args).current_dir(cwd).spawn() {
         Err(msg) => {
-            println!("Error while spaning command '{:?} {:?}' : {}", &ar_command, &modified_args, msg);
+            println!("Error while spawning command '{:?} {:?}' : {}", &ar_command, &modified_args, msg);
             return;
         }
         Ok(mut child) => {
@@ -212,7 +226,7 @@ fn is_object(p : &Path) -> bool {
     p.extension().map_or(false, |e| e == "o")
 }
 
-fn build_bitcode_compile_only(ft : &mut FileTracker, bc_command : &OsStr, args : &[String], cwd : &PathBuf) {
+fn build_bitcode_compile_only(ft : &mut FileTracker, bc_command : &OsStr, args : &[String], cwd : &Path) -> anyhow::Result<()> {
     let mut orig_target = OsString::from("");
     let mut new_target = OsString::from("");
     let mut modified_args = Vec::new() as Vec<OsString>;
@@ -223,8 +237,7 @@ fn build_bitcode_compile_only(ft : &mut FileTracker, bc_command : &OsStr, args :
         if arg == "-o" {
             match it.next() {
                 None => {
-                    println!("No output file in command '{:?} {:?}'", bc_command, args);
-                    return;
+                    return Err(anyhow::Error::new(BitcodeError::MissingOutputFile(Path::new(bc_command).to_path_buf(), Vec::from(args))));
                 }
                 Some(target) => {
                     orig_target = PathBuf::from(&target).into_os_string();
@@ -239,15 +252,105 @@ fn build_bitcode_compile_only(ft : &mut FileTracker, bc_command : &OsStr, args :
 
     match Command::new(&bc_command).args(&modified_args).current_dir(cwd).spawn() {
         Err(msg) => {
-            println!("Error while spawning command '{:?} {:?}': {}", &bc_command, &modified_args, msg);
-            return;
+            Err(anyhow::Error::new(BitcodeError::ErrorGeneratingBitcode(Path::new(bc_command).to_path_buf(), Vec::from(modified_args), msg)))
         }
         Ok(mut child) => {
             let _rc = child.wait();
+            attach_bitcode(cwd, &orig_target, &new_target)?;
             add_file_mapping(ft, orig_target, new_target);
+            Ok(())
         }
     }
 }
+
+/// Convert the (potentially relative) path to an absolute path
+///
+/// If the `partial_path` is already absolute, just return it.
+///
+/// Otherwise, make the path absolute by prefixing the `cwd`.
+fn to_absolute(cwd : &Path, partial_path : &OsString) -> PathBuf {
+    let mut p = PathBuf::new();
+    let partial = Path::new(partial_path);
+    if partial.is_absolute() {
+        p.push(partial_path);
+        p
+    } else {
+        // NOTE: Investigate this - PathBuf.push replaces the original root if
+        // the thing pushed is absolute - we can probably just use that behavior
+        p.push(cwd);
+        p.push(partial_path);
+        p
+    }
+}
+
+#[derive(thiserror::Error,Debug)]
+pub enum BitcodeError {
+    #[error("Error attaching bitcode file '{2:?}' to '{1:?}' in {0:?} ({3:?})")]
+    ErrorAttachingBitcode(PathBuf, OsString, OsString, std::io::Error),
+    #[error("Missing output file in command {0:?} {1:?}")]
+    MissingOutputFile(PathBuf, Vec<String>),
+    #[error("Error generating bitcode with command {0:?} {1:?} ({2:?})")]
+    ErrorGeneratingBitcode(PathBuf, Vec<OsString>, std::io::Error)
+}
+
+/// Attach the bitcode file at the given path to its associated object file target
+///
+/// We pass in the working directory in which the objects were constructed so
+/// that we can generate appropriate commands (in terms of absolute paths) so
+/// that we don't need to worry about where we are replaying the build from.
+fn attach_bitcode(cwd : &Path, orig_target : &OsString, bc_target : &OsString) -> anyhow::Result<()> {
+    let object_path = to_absolute(cwd, orig_target);
+    let bc_path = to_absolute(cwd, bc_target);
+
+    let mut hasher = Sha256::new();
+    let mut bc_content = Vec::new();
+    let mut bc_file = std::fs::File::open(&bc_path)?;
+    bc_file.read_to_end(&mut bc_content)?;
+    hasher.update(bc_content);
+    let hash = hasher.finalize();
+
+    let mut tar_file = tempfile::NamedTempFile::new()?;
+    let tar_name = OsString::from(tar_file.path());
+    let mut tb = tar::Builder::new(&mut tar_file);
+    // Create a singleton tar file with the bitcode file.
+    //
+    // We use the original relative name to make it easy to unpack.
+    //
+    // In most cases, this should avoid duplicates, but it is possible that
+    // there could be collisions if the build system does a lot of changing of
+    // directories with source files that have similar names.
+    //
+    // To avoid collisions, we append a hash to each filename
+    let bc_path = Path::new(bc_target);
+    let mut archived_name = OsString::new();
+    archived_name.push(bc_path.file_stem().unwrap());
+    archived_name.push("-");
+    archived_name.push(hex::encode(hash));
+    archived_name.push(".");
+    archived_name.push(bc_path.extension().unwrap());
+
+    tb.append_path_with_name(bc_path, &archived_name)?;
+    tb.into_inner()?;
+
+
+    let mut objcopy_args = Vec::new();
+    objcopy_args.push(OsString::from("--add-section"));
+    let ok_tar_name = tar_name.into_string().ok().unwrap();
+    objcopy_args.push(OsString::from(format!("{}={}", ELF_SECTION_NAME, ok_tar_name)));
+    objcopy_args.push(object_path.into_os_string());
+
+    match Command::new("objcopy").args(&objcopy_args).spawn() {
+        Err(msg) => {
+            return Err(anyhow::Error::new(BitcodeError::ErrorAttachingBitcode(cwd.to_path_buf(), orig_target.clone(), bc_target.clone(), msg)));
+        }
+        Ok(mut child) => {
+            let _rc = child.wait();
+            Ok(())
+        }
+    }
+}
+
+pub const ELF_SECTION_NAME : &str = ".llvm_bitcode";
 
 pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<()> {
     let loaded_trace = load_trace(&bitcode_options.input)?;

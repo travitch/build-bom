@@ -17,8 +17,13 @@ serde = { version = "^1", features = ["derive"] }
 rmp-serde = "^0.14"
 serde_json = "1.0"
 thiserror = "1.0"
+glob = "0.3"
 slab_tree = "^0.3"
 which = "^4"
+tar = "0.4"
+tempfile = "3.1"
+sha2 = "^0.9"
+hex = "0.4"
 
 [patch.crates-io]
 pete = { git = "http://github.com/travitch/pete", branch = "tr/vfork-child-fix" }

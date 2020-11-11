@@ -7,3 +7,4 @@ pub mod versioning;
 pub mod bitcode;
 pub mod loader;
 pub mod deptree;
+pub mod extract;

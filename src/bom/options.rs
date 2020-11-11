@@ -14,15 +14,24 @@ pub struct Options {
 pub enum Subcommand {
     Trace(TraceOptions),
     Normalize(NormalizeOptions),
-    Bitcode(BitcodeOptions)
+    Bitcode(BitcodeOptions),
+    ExtractBitcode(ExtractOptions)
+}
+
+#[derive(Debug,StructOpt)]
+pub struct ExtractOptions {
+    #[structopt(help="The file to extract bitcode from")]
+    pub input : PathBuf,
+    #[structopt(short="o", long="output", help="The file to save the resulting bitcode file to")]
+    pub output : PathBuf,
+    #[structopt(long="llvm-tool-suffix", help="A suffix to add to all llvm tools (usually a version number)")]
+    pub llvm_tool_suffix : Option<String>
 }
 
 #[derive(Debug,StructOpt)]
 pub struct BitcodeOptions {
-    #[structopt(short="i", long="input", help="A file containing traced build actions")]
+    #[structopt(help="A file containing traced build actions")]
     pub input : PathBuf,
-    #[structopt(short="o", long="output", help="The file to save generated bitcode to")]
-    pub output : PathBuf,
     #[structopt(long="clang", help="Name of the clang binary to use to generate bitcode (default: `clang`)")]
     pub clang_path : Option<PathBuf>,
     #[structopt(long="dry-run", help="Simulate the build without executing any commands")]
@@ -36,7 +45,7 @@ pub struct BitcodeOptions {
 #[derive(Debug,StructOpt)]
 #[structopt(help="A normalization pass over traced build actions")]
 pub struct NormalizeOptions {
-    #[structopt(short = "i", long = "input", help = "A file containing raw traced build actions")]
+    #[structopt(help = "A file containing raw traced build actions")]
     pub input : PathBuf,
     #[structopt(short = "o", long = "output", help = "The file to save normalized traced build actions to")]
     pub output : PathBuf,
