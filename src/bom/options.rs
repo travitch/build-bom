@@ -14,7 +14,7 @@ pub struct Options {
 pub enum Subcommand {
     Trace(TraceOptions),
     Normalize(NormalizeOptions),
-    Bitcode(BitcodeOptions),
+    GenerateBitcode(BitcodeOptions),
     ExtractBitcode(ExtractOptions)
 }
 

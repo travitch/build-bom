@@ -22,8 +22,9 @@ The traces can be independently useful for build process analysis, even if repla
 #+BEGIN_SRC
 
 $ build-bom trace --output=/tmp/my-build.json -- make
-$ build-bom normalize --input=/tmp/my-build.json --output=/tmp/my-build-norm.json # Optional, but potentially informative
-$ build-bom bitcode --input=/tmp/my-build-norm.json --output /tmp/target.bc
+$ build-bom normalize --output=/tmp/my-build-norm.json /tmp/my-build.json # Optional, but potentially informative
+$ build-bom generate-bitcode /tmp/my-build-norm.json
+$ build-bom extract-bitcode /path/to/binary --output=/tmp/output.bc
 
 #+END_SRC
 
