@@ -57,6 +57,21 @@ Earlier tools in this space include
 
 These tools act as drop-in replacements that pretend to be your normal compiler and linker, but run additional commands to also compile the program to LLVM bitcode.  These tools are very effective, but can require significant understanding and re-engineering of build systems to integrate.  The ~build-bom~ tool is designed to support build system analysis without any modifications to the existing build system (and ideally without ever even looking at it).
 
+* Full Example
+
+Here is a full example on a real codebase:
+
+#+BEGIN_SRC sh
+  wget https://ftp.gnu.org/gnu/tar/tar-1.32.tar.gz
+  tar xf tar-1.32.tar.gz
+  cd tar-1.32
+  ./configure
+  # Run the build under the bitcode generator
+  build-bom generate-bitcode -- make
+  # Use a suffix of on LLVM tools because they are version-suffixed on Ubuntu
+  build-bom extract-bitcode src/tar --output=../tar.bc --llvm-tool-suffix=-9
+#+END_SRC
+
 * Roadmap
 
 - Serious polish required
