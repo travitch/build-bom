@@ -28,4 +28,4 @@ regex = "1"
 lazy_static = "1"
 
 [patch.crates-io]
-pete = { git = "http://github.com/travitch/pete", branch = "master" }
+pete = { git = "http://github.com/ranweiler/pete", branch = "ooo-event" }
