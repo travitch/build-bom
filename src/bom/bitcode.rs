@@ -34,6 +34,52 @@ fn is_compile_command_name(cmd_name : &OsStr) -> bool {
     }
 }
 
+static SINGLE_ARG_OPTIONS : &'static [&str] =
+    &[r"-o",
+      r"--param",
+      r"-aux-info",
+      r"-A",
+      r"-D",
+      r"-U",
+      r"-arch",
+      r"-MF",
+      r"-MT",
+      r"-MQ",
+      r"-I",
+      r"-idirafter",
+      r"-include",
+      r"-imacros",
+      r"-iprefix",
+      r"-iwithprefix",
+      r"-iwithprefixbefore",
+      r"-isystem",
+      r"-isysroot",
+      r"-iquote",
+      r"-imultilib",
+      r"-target",
+      r"-x",
+      r"-Xclang",
+      r"-Xpreprocessor",
+      r"-Xassembler",
+      r"-Xlinker",
+      r"-l",
+      r"-L",
+      r"-T",
+      r"-u",
+      r"-e",
+      r"-rpath",
+      r"-current_version",
+      r"-compatibility_version"
+    ];
+
+lazy_static::lazy_static! {
+    static ref SINGLE_ARG_OPTION_RE : regex::RegexSet = regex::RegexSet::new(SINGLE_ARG_OPTIONS).unwrap();
+}
+
+lazy_static::lazy_static! {
+    static ref OTHER_ARG_PREFIX_RE : regex::Regex = regex::Regex::new(r"-.*").unwrap();
+}
+
 static CLANG_ARGUMENT_BLACKLIST : &'static [&str] =
     &[r"-fno-tree-loop-im",
       r"-Wmaybe-uninitialized",
@@ -76,7 +122,7 @@ lazy_static::lazy_static! {
 }
 
 fn build_bitcode_compile_only(bc_command : &OsStr, args : &[OsString], cwd : &Path) -> anyhow::Result<()> {
-    let mut orig_target = OsString::from("");
+    let mut orig_target = None;
     let mut new_target = OsString::from("");
     let mut modified_args = Vec::new() as Vec<OsString>;
     modified_args.push(OsString::from("-emit-llvm"));
@@ -99,7 +145,7 @@ fn build_bitcode_compile_only(bc_command : &OsStr, args : &[OsString], cwd : &Pa
                     return Err(anyhow::Error::new(BitcodeError::MissingOutputFile(Path::new(bc_command).to_path_buf(), Vec::from(args))));
                 }
                 Some(target) => {
-                    orig_target = PathBuf::from(&target).into_os_string();
+                    orig_target = Some(PathBuf::from(&target).into_os_string());
                     let mut target_path = PathBuf::from(&target);
                     target_path.set_extension("bc");
                     new_target = OsString::from(target_path.clone());
@@ -109,13 +155,35 @@ fn build_bitcode_compile_only(bc_command : &OsStr, args : &[OsString], cwd : &Pa
         }
     }
 
+    let resolved_object_target;
+    let resolved_bitcode_target;
+    match orig_target {
+        Some(t) => {
+            // We found a target explicitly specified with -o
+            resolved_object_target = t;
+            resolved_bitcode_target = new_target;
+        }
+        None => {
+            // There was no explicitly-specified object file.  If there was a
+            // single input source file, the object file name will be that input
+            // source with the extension replaced by .o.
+            let source_file = input_sources(args)?;
+            let mut target_path = PathBuf::from(source_file);
+            target_path.set_extension("o");
+            resolved_object_target = OsString::from(target_path.clone());
+            let mut bc_path = target_path;
+            bc_path.set_extension("bc");
+            resolved_bitcode_target = OsString::from(bc_path.clone());
+        }
+    }
+
     match Command::new(&bc_command).args(&modified_args).current_dir(cwd).spawn() {
         Err(msg) => {
             Err(anyhow::Error::new(BitcodeError::ErrorGeneratingBitcode(Path::new(bc_command).to_path_buf(), Vec::from(modified_args), msg)))
         }
         Ok(mut child) => {
             let _rc = child.wait();
-            attach_bitcode(cwd, &orig_target, &new_target)?;
+            attach_bitcode(cwd, &resolved_object_target, &resolved_bitcode_target)?;
             Ok(())
         }
     }
@@ -141,6 +209,35 @@ fn to_absolute(cwd : &Path, partial_path : &OsString) -> PathBuf {
     }
 }
 
+fn input_sources<'a>(args : &'a[OsString]) -> Result<&'a OsString,BitcodeError> {
+    let mut inputs = Vec::new();
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.to_str() {
+            None => {
+                // FIXME: This really shouldn't happen
+            }
+            Some(arg_str) => {
+                if SINGLE_ARG_OPTION_RE.is_match(&arg_str) {
+                    // Discard the next argument since it can't be a source file
+                    let _next_arg = it.next();
+                } else if OTHER_ARG_PREFIX_RE.is_match(&arg_str) {
+                    // Just ignore this
+                } else {
+                    // This is an argument
+                    inputs.push(arg);
+                }
+            }
+        }
+    }
+
+    if inputs.len() == 1 {
+        Ok(inputs[0])
+    } else {
+        Err(BitcodeError::MultipleInputFiles(inputs.iter().map(|s| s.to_string_lossy().into_owned()).collect()))
+    }
+}
+
 #[derive(thiserror::Error,Debug)]
 pub enum BitcodeError {
     #[error("Error attaching bitcode file '{2:?}' to '{1:?}' in {0:?} ({3:?})")]
@@ -150,7 +247,9 @@ pub enum BitcodeError {
     #[error("Error generating bitcode with command {0:?} {1:?} ({2:?})")]
     ErrorGeneratingBitcode(PathBuf, Vec<OsString>, std::io::Error),
     #[error("Unreadable memory address {0:}")]
-    UnreadableMemoryAddress(u64)
+    UnreadableMemoryAddress(u64),
+    #[error("Multiple input files found for command: {0:?}")]
+    MultipleInputFiles(Vec<String>)
 }
 
 /// Attach the bitcode file at the given path to its associated object file target
@@ -318,6 +417,7 @@ fn generate_bitcode(mut ptracer : pete::Ptracer) -> anyhow::Result<()> {
                         let cmd_path = Path::new(&rc.bin);
                         let mut has_compile_only_flag = false;
                         let mut has_pipe_io = false;
+                        let mut is_assemble_only = false;
                         for arg in &rc.args {
                             has_compile_only_flag = has_compile_only_flag || arg == "-c";
                             // We want to recognize cases where the compilation
@@ -327,11 +427,19 @@ fn generate_bitcode(mut ptracer : pete::Ptracer) -> anyhow::Result<()> {
                             //
                             // FIXME: collect metrics on this
                             has_pipe_io = has_pipe_io || arg == "-";
+                            // We could potentially track builds that
+                            // assemble-only, but the worry is that gnarly
+                            // things happen to artifacts constructed that way
+                            // that we might miss.
+                            //
+                            // For now, ignore them.  This could be guarded
+                            // behind an option.
+                            is_assemble_only = is_assemble_only || arg == "-S";
                         }
                         let should_make_bc = match cmd_path.file_name() {
                             None => { false }
                             Some(cmd_file_name) => {
-                                is_compile_command_name(cmd_file_name) && has_compile_only_flag && !has_pipe_io
+                                is_compile_command_name(cmd_file_name) && has_compile_only_flag && !has_pipe_io && !is_assemble_only
                             }
                         };
 
