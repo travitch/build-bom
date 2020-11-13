@@ -24,6 +24,8 @@ tar = "0.4"
 tempfile = "3.1"
 sha2 = "^0.9"
 hex = "0.4"
+regex = "1"
+lazy_static = "1"
 
 [patch.crates-io]
 pete = { git = "http://github.com/travitch/pete", branch = "master" }

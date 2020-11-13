@@ -12,13 +12,67 @@ use crate::bom::syscalls::load_syscalls;
 use crate::bom::event::RawString;
 use crate::bom::proc_read::{read_str_from,read_str_list_from,read_environment,read_cwd};
 
+static COMPILE_COMMANDS: &'static [&str] =
+    &[r"gcc",
+      r"g\+\+",
+      r"cc",
+      r"c\+\+",
+      r"clang",
+      r"clang\+\+",
+      r"gcc-\d+(\.\d+)",
+      r"g\+\+-\d+(\.\d+)"
+    ];
+
+lazy_static::lazy_static! {
+    static ref COMPILE_COMMAND_RE : regex::RegexSet = regex::RegexSet::new(COMPILE_COMMANDS).unwrap();
+}
+
 fn is_compile_command_name(cmd_name : &OsStr) -> bool {
-    cmd_name == "gcc" ||
-        cmd_name == "g++" ||
-        cmd_name == "cc" ||
-        cmd_name == "c++" ||
-        cmd_name == "clang" ||
-        cmd_name == "clang++"
+    match cmd_name.to_str() {
+        None => { false }
+        Some(s) => { COMPILE_COMMAND_RE.is_match(s) }
+    }
+}
+
+static CLANG_ARGUMENT_BLACKLIST : &'static [&str] =
+    &[r"-fno-tree-loop-im",
+      r"-Wmaybe-uninitialized",
+      r"-Wno-maybe-uninitialized",
+      r"-mindirect-branch-register",
+      r"-mindirect-branch=.*",
+      r"-mpreferred-stack-boundary=\d+",
+      r"-Wframe-address",
+      r"-Wno-frame-address",
+      r"-Wno-format-truncation",
+      r"-Wno-format-overflow",
+      r"-Wformat-overflow",
+      r"-Wformat-truncation",
+      r"-Wpacked-not-aligned",
+      r"-Wno-packed-not-aligned",
+      r"-Werror=.*",
+      r"-Wno-restrict",
+      r"-Wrestrict",
+      r"-Wno-unused-but-set-variable",
+      r"-Wunused-but-set-variable",
+      r"-Wno-stringop-truncation",
+      r"-Wno-stringop-overflow",
+      r"-Wstringop-truncation",
+      r"-Wstringop-overflow",
+      r"-Wzero-length-bounds",
+      r"-Wno-zero-length-bounds",
+      r"-fno-allow-store-data-races",
+      r"-fno-var-tracking-assignments",
+      r"-fmerge-constants",
+      r"-fconserve-stack",
+      r"-falign-jumps=\d+",
+      r"-falign-loops=\d+",
+      r"-mno-fp-ret-in-387",
+      r"-mskip-rax-setup",
+      r"--param=.*"
+      ];
+
+lazy_static::lazy_static! {
+    static ref CLANG_ARGUMENT_BLACKLIST_RE : regex::RegexSet = regex::RegexSet::new(CLANG_ARGUMENT_BLACKLIST).unwrap();
 }
 
 fn build_bitcode_compile_only(bc_command : &OsStr, args : &[OsString], cwd : &Path) -> anyhow::Result<()> {
@@ -28,6 +82,16 @@ fn build_bitcode_compile_only(bc_command : &OsStr, args : &[OsString], cwd : &Pa
     modified_args.push(OsString::from("-emit-llvm"));
     let mut it = args.iter();
     while let Some(arg) = it.next() {
+        // Skip any argument on the clang argument blacklist
+        match arg.to_str() {
+            None => { }
+            Some(str_arg) => {
+                if CLANG_ARGUMENT_BLACKLIST_RE.is_match(str_arg) {
+                    continue;
+                }
+            }
+        }
+
         modified_args.push(OsString::from(arg.to_owned()));
         if arg == "-o" {
             match it.next() {
@@ -253,13 +317,21 @@ fn generate_bitcode(mut ptracer : pete::Ptracer) -> anyhow::Result<()> {
                         // The process successfully execed - see if we want to do anything with it
                         let cmd_path = Path::new(&rc.bin);
                         let mut has_compile_only_flag = false;
+                        let mut has_pipe_io = false;
                         for arg in &rc.args {
                             has_compile_only_flag = has_compile_only_flag || arg == "-c";
+                            // We want to recognize cases where the compilation
+                            // input is stdin or the output is stdout; we can't
+                            // replicate those build steps since we don't know
+                            // where either is really going to/coming from.
+                            //
+                            // FIXME: collect metrics on this
+                            has_pipe_io = has_pipe_io || arg == "-";
                         }
                         let should_make_bc = match cmd_path.file_name() {
                             None => { false }
                             Some(cmd_file_name) => {
-                                is_compile_command_name(cmd_file_name) && has_compile_only_flag
+                                is_compile_command_name(cmd_file_name) && has_compile_only_flag && !has_pipe_io
                             }
                         };
 
