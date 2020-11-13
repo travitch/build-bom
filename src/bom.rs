@@ -9,3 +9,4 @@ pub mod loader;
 pub mod deptree;
 pub mod extract;
 pub mod proc_read;
+pub mod clang_support;
