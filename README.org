@@ -13,17 +13,17 @@ This tool is primarily designed to help tame the myriad build systems of the C/C
 
 * Usage
 
-The workflow of this tool proceeds in two phases:
-1. Tracing the existing build process
-2. Analyzing the trace and replaying it with modifications
+This tool wraps your normal build command and builds LLVM bitcode when possible.  It arranges things such that any binary artifacts produced by your build system (e.g., object files, archives, shared libraries, or binaries) have their LLVM bitcode attached to them and accessible. The workflow of this tool proceeds in two phases:
+1. Building your software (using the ~generate-bitcode~ command wrapper)
+2. Extracting your bitcode (using the ~extract-bitcode~ command)
 
-The traces can be independently useful for build process analysis, even if replay is not desired.  An example use of the tool is shown below for a ~make~-based build:
+There tool also supports some auxiliary commands for generating traces of builds for visualization and understanding.
+
+An example use of the tool is shown below for a ~make~-based build:
 
 #+BEGIN_SRC
 
-$ build-bom trace --output=/tmp/my-build.json -- make
-$ build-bom normalize --output=/tmp/my-build-norm.json /tmp/my-build.json # Optional, but potentially informative
-$ build-bom generate-bitcode /tmp/my-build-norm.json
+$ build-bom generate-bitcode -- make
 $ build-bom extract-bitcode /path/to/binary --output=/tmp/output.bc
 
 #+END_SRC

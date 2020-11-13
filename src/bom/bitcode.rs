@@ -3,230 +3,25 @@ use std::path::{Path,PathBuf};
 use std::io::Read;
 use std::process::Command;
 use std::ffi::{OsStr,OsString};
+use std::os::unix::ffi::OsStringExt;
 
 use sha2::{Digest,Sha256};
-use slab_tree::NodeRef;
 
-use crate::bom::options::{BitcodeOptions,StringNormalizeStrategy,Normalization};
-use crate::bom::loader::{SomeLoadedTrace,load_trace};
-use crate::bom::normalize::normalize;
-use crate::bom::event::{EventType,TraceEvent};
-use crate::bom::deptree::{Task,build_task_tree};
+use crate::bom::options::{BitcodeOptions};
+use crate::bom::syscalls::load_syscalls;
+use crate::bom::event::RawString;
+use crate::bom::proc_read::{read_str_from,read_str_list_from,read_environment,read_cwd};
 
-fn group_events<E>(events : Vec<TraceEvent<E>>) -> HashMap<i32,Vec<TraceEvent<E>>> {
-    let mut groups = HashMap::new();
-    for evt in events {
-        match groups.get(&evt.pid) {
-            Some(_) => {}
-            None => { groups.insert(evt.pid, Vec::new()); }
-        }
-        let task_vec = groups.get_mut(&evt.pid).unwrap();
-        task_vec.push(evt);
-    }
-
-    groups
+fn is_compile_command_name(cmd_name : &OsStr) -> bool {
+    cmd_name == "gcc" ||
+        cmd_name == "g++" ||
+        cmd_name == "cc" ||
+        cmd_name == "c++" ||
+        cmd_name == "clang" ||
+        cmd_name == "clang++"
 }
 
-fn is_terminal_command( command : &str) -> bool {
-    let cmd_path = Path::new(command);
-    match cmd_path.file_name() {
-        None => { true }
-        Some(cmd_file_name) => {
-            cmd_file_name == "gcc" ||
-                cmd_file_name == "g++" ||
-                cmd_file_name == "clang" ||
-                cmd_file_name == "clang++" ||
-                cmd_file_name == "ar" ||
-                command == "/bin/sh"
-        }
-    }
-}
-
-fn debug_tree(n : NodeRef<Task>, level : i32, verbose : bool) {
-    let mut is_terminal = false;
-    for evt in &n.data().task_events {
-        // If there is an exec, print it
-        match &evt.evt {
-            EventType::Exec { command, args, cwd, .. } => {
-                is_terminal = is_terminal_command(command) || is_terminal;
-                // Don't run the root command
-                if level != 0 {
-                    if verbose {
-                        println!("{}{} {:?} @ {:?}", " ".repeat((level * 4) as usize), command, args, cwd);
-                    } else {
-                        println!("{}{}", " ".repeat((level * 4) as usize), command);
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    if !is_terminal {
-        // Traverse children with a deeper level
-        for c in n.children() {
-            debug_tree(c, level + 1, verbose);
-        }
-    }
-}
-
-/// Replay a build exactly, invoking "shadow" commands to build bitcode where necessary
-fn replay_build(bitcode_options : &BitcodeOptions, ft : &mut FileTracker, n : NodeRef<Task>) {
-    let mut is_terminal = false;
-    for evt in &n.data().task_events {
-        match &evt.evt {
-            EventType::Exec { command, args, cwd, .. } => {
-                is_terminal = is_terminal_command(command) || is_terminal;
-
-                let cmd_path = Path::new(command);
-                match cmd_path.file_name() {
-                    None => {
-                        // Can't exec something with no command...
-                    }
-                    Some(cmd_file_name) => {
-                        // We run the command as long as it is not a recursive make invocation
-                        //
-                        // We already have the commands that make will invoke,
-                        // so there is no need to re-run make.
-                        //
-                        // FIXME: More generally: we want to skip re-running any build systems
-                        if cmd_file_name != "make" && cmd_file_name != "gmake" {
-                            let (_, rest_args) = args.split_at(1);
-                            println!("{} {:?} @ {:?}", command, rest_args, cwd);
-                            match Command::new(command).args(rest_args).current_dir(cwd).spawn() {
-                                Err(msg) => { println!("Error while spawning command '{:?}': {}", command, msg) }
-                                Ok(mut child) => {
-                                    let _rc = child.wait();
-                                }
-                            }
-                            match build_bitcode(bitcode_options, ft, command, rest_args, cwd.as_path()) {
-                                Ok(_) => {}
-                                Err(msg) => {
-                                    println!("Error building bitcode: {:?}", msg);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    if !is_terminal {
-        for c in n.children() {
-            replay_build(bitcode_options, ft, c);
-        }
-    }
-}
-
-/// Given a command, modify it to build bitcode (if possible)
-///
-/// NOTE: this function expects that argv[0] (the program name in the original
-/// exec call) has been stripped off.
-///
-/// We intercept the following commands:
-///
-/// - gcc -c (-> clang -emit-llvm -c)
-/// - g++ -c (-> clang++ -emit-llvm -c)
-/// - ar (-> llvm-ar)
-///
-/// TODO:
-///
-/// - ld (-> llvm-link)
-/// - gcc (-> llvm-link)
-/// - g++ (-> llvm-link)
-/// - as (-> llvm-as)
-fn build_bitcode(bitcode_options : &BitcodeOptions, ft : &mut FileTracker, command : &str, args : &[String], cwd : &Path) -> anyhow::Result<()> {
-    let mut is_compile_only = false;
-    for arg in args {
-        if arg == "-c" {
-            is_compile_only = true;
-        }
-    }
-
-    let cmd_path = Path::new(command);
-    match cmd_path.file_name() {
-        None => {
-            // This should probably be impossible (or it was a broken exec of a directory)
-            //
-            // No reason to panic...
-            Ok(())
-        }
-        Some(cmd_file_name) => {
-            if (cmd_file_name == "gcc" || cmd_file_name == "g++" || cmd_file_name == "clang" || cmd_file_name == "clang++") && is_compile_only {
-                let mut bc_command = OsString::from("clang");
-                match &bitcode_options.clang_path {
-                    None => {}
-                    Some(alt) => {
-                        bc_command = OsString::from(alt);
-                    }
-                }
-                if cmd_file_name == "g++" || cmd_file_name == "clang++" {
-                    bc_command.push("++")
-                }
-                build_bitcode_compile_only(ft, &bc_command, args, cwd)?;
-            } else if cmd_file_name == "ar" {
-                let mut ar_command = OsString::from("llvm-ar");
-                match &bitcode_options.llvm_tool_suffix {
-                    None => {}
-                    Some(suffix) => {
-                        ar_command.push(suffix);
-                    }
-                }
-                build_bitcode_archive(ft, &ar_command, args, cwd);
-            }
-            Ok(())
-        }
-    }
-}
-
-fn build_bitcode_archive(ft : &mut FileTracker, ar_command : &OsStr, args : &[String], cwd : &Path) {
-    // /usr/bin/ar ["rc", "libz.a", "adler32.o", "crc32.o",
-    let mut modified_args = Vec::new() as Vec<OsString>;
-    let mut it = args.iter();
-    while let Some(arg) = it.next() {
-        let p = Path::new(arg);
-        if is_archive(p) {
-            let mut pb = p.to_path_buf();
-            pb.set_extension("bca");
-            modified_args.push(OsString::from(pb.clone()));
-            add_file_mapping(ft, OsString::from(p.clone()), OsString::from(pb.clone()));
-        } else if is_object(p) {
-            match get_file_mapping(ft, p.as_os_str()) {
-                None => {
-                    println!("No object mapping for file {:?}", p);
-                    modified_args.push(OsString::from(p));
-                }
-                Some(bc_file) => {
-                    modified_args.push(OsString::from(bc_file));
-                }
-            }
-        } else {
-            modified_args.push(OsString::from(arg));
-        }
-    }
-
-    match Command::new(&ar_command).args(&modified_args).current_dir(cwd).spawn() {
-        Err(msg) => {
-            println!("Error while spawning command '{:?} {:?}' : {}", &ar_command, &modified_args, msg);
-            return;
-        }
-        Ok(mut child) => {
-            let _rc = child.wait();
-        }
-    }
-}
-
-fn is_archive(p : &Path) -> bool {
-    p.extension().map_or(false, |e| e == "a")
-}
-
-fn is_object(p : &Path) -> bool {
-    p.extension().map_or(false, |e| e == "o")
-}
-
-fn build_bitcode_compile_only(ft : &mut FileTracker, bc_command : &OsStr, args : &[String], cwd : &Path) -> anyhow::Result<()> {
+fn build_bitcode_compile_only(bc_command : &OsStr, args : &[OsString], cwd : &Path) -> anyhow::Result<()> {
     let mut orig_target = OsString::from("");
     let mut new_target = OsString::from("");
     let mut modified_args = Vec::new() as Vec<OsString>;
@@ -257,7 +52,6 @@ fn build_bitcode_compile_only(ft : &mut FileTracker, bc_command : &OsStr, args :
         Ok(mut child) => {
             let _rc = child.wait();
             attach_bitcode(cwd, &orig_target, &new_target)?;
-            add_file_mapping(ft, orig_target, new_target);
             Ok(())
         }
     }
@@ -288,9 +82,11 @@ pub enum BitcodeError {
     #[error("Error attaching bitcode file '{2:?}' to '{1:?}' in {0:?} ({3:?})")]
     ErrorAttachingBitcode(PathBuf, OsString, OsString, std::io::Error),
     #[error("Missing output file in command {0:?} {1:?}")]
-    MissingOutputFile(PathBuf, Vec<String>),
+    MissingOutputFile(PathBuf, Vec<OsString>),
     #[error("Error generating bitcode with command {0:?} {1:?} ({2:?})")]
-    ErrorGeneratingBitcode(PathBuf, Vec<OsString>, std::io::Error)
+    ErrorGeneratingBitcode(PathBuf, Vec<OsString>, std::io::Error),
+    #[error("Unreadable memory address {0:}")]
+    UnreadableMemoryAddress(u64)
 }
 
 /// Attach the bitcode file at the given path to its associated object file target
@@ -321,25 +117,23 @@ fn attach_bitcode(cwd : &Path, orig_target : &OsString, bc_target : &OsString) -
     // directories with source files that have similar names.
     //
     // To avoid collisions, we append a hash to each filename
-    let bc_path = Path::new(bc_target);
+    let bc_target_path = Path::new(bc_target);
     let mut archived_name = OsString::new();
-    archived_name.push(bc_path.file_stem().unwrap());
+    archived_name.push(bc_target_path.file_stem().unwrap());
     archived_name.push("-");
     archived_name.push(hex::encode(hash));
     archived_name.push(".");
-    archived_name.push(bc_path.extension().unwrap());
+    archived_name.push(bc_target_path.extension().unwrap());
 
     tb.append_path_with_name(bc_path, &archived_name)?;
     tb.into_inner()?;
-
 
     let mut objcopy_args = Vec::new();
     objcopy_args.push(OsString::from("--add-section"));
     let ok_tar_name = tar_name.into_string().ok().unwrap();
     objcopy_args.push(OsString::from(format!("{}={}", ELF_SECTION_NAME, ok_tar_name)));
     objcopy_args.push(object_path.into_os_string());
-
-    match Command::new("objcopy").args(&objcopy_args).spawn() {
+    match Command::new("objcopy").args(&objcopy_args).current_dir(cwd).spawn() {
         Err(msg) => {
             return Err(anyhow::Error::new(BitcodeError::ErrorAttachingBitcode(cwd.to_path_buf(), orig_target.clone(), bc_target.clone(), msg)));
         }
@@ -353,55 +147,165 @@ fn attach_bitcode(cwd : &Path, orig_target : &OsString, bc_target : &OsString) -
 pub const ELF_SECTION_NAME : &str = ".llvm_bitcode";
 
 pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<()> {
-    let loaded_trace = load_trace(&bitcode_options.input)?;
-    // Handle either raw events (normalize them first) or pre-normalized events (that have to be grouped)
-    let (root_task, event_groups) = match loaded_trace {
-        SomeLoadedTrace::RawTrace(raw_trace) => {
-            let mut normalizations = Vec::new();
-            normalizations.push(Normalization::ElideClose);
-            normalizations.push(Normalization::ElideFailedOpen);
-            normalizations.push(Normalization::ElideFailedExec);
-            let events = normalize(&StringNormalizeStrategy::Strict, &normalizations, raw_trace.events.as_slice())?;
-            (raw_trace.root_task, events)
-        }
-        SomeLoadedTrace::NormalizedTrace(loaded_trace) => {
-            let groups = group_events(loaded_trace.events);
-            (loaded_trace.root_task, groups)
-        }
-    };
+    let (cmd0, args0) = bitcode_options.command.split_at(1);
+    let cmd_path = which::which(OsString::from(&cmd0[0]))?;
+    let mut resolved_command = Vec::new();
+    resolved_command.push(String::from(cmd_path.to_str().unwrap()));
+    for a in args0 {
+        resolved_command.push(String::from(a));
+    }
+    let cmd = pete::Command::new(resolved_command)?;
+    let mut ptracer = pete::Ptracer::new();
+    let tracee = ptracer.spawn(cmd)?;
+    ptracer.restart(tracee, pete::Restart::Syscall)?;
 
-    let t = build_task_tree(root_task, &event_groups)?;
-    if bitcode_options.dry_run {
-        debug_tree(t.root().unwrap(), 0, bitcode_options.verbose);
-    } else {
-        let mut ft = new();
-        // Iterate over all of the children of the root.  We skip the root
-        // because it is the invocation of the build command (which we are
-        // emulating and would rather not run again).
-        let root = t.root().unwrap();
-        for c in root.children() {
-            replay_build(bitcode_options, &mut ft, c);
+    generate_bitcode(ptracer)?;
+
+    Ok(())
+}
+
+#[derive(Debug)]
+struct RunCommand {
+    bin : OsString,
+    args : Vec<OsString>,
+    env : Vec<u8>,
+    cwd : PathBuf
+}
+
+enum ProcessState {
+    TryExec(RunCommand),
+    FinishExec(RunCommand)
+}
+
+fn generate_bitcode(mut ptracer : pete::Ptracer) -> anyhow::Result<()> {
+    let mut process_state = HashMap::new();
+    let syscalls = load_syscalls();
+    // We want to observe execve syscalls. After a process (successfully) execs
+    // a command we care about, we want to record that PID (along with the
+    // arguments) and then, when that PID Exits, we want to generate bitcode and
+    // attach it to the original object file result.
+    while let Ok(Some(mut tracee)) = ptracer.wait() {
+        let regs = tracee.registers()?;
+        match tracee.stop {
+            pete::Stop::SyscallEnterStop(pid) => {
+                let rax = regs.orig_rax;
+                let syscall = syscalls.get(&rax).unwrap();
+                if syscall == "execve" {
+                    let bin = read_str_from(&mut tracee, regs.rdi);
+                    let args = read_str_list_from(&mut tracee, regs.rsi);
+                    let env = read_environment(&tracee);
+                    let cwd = read_cwd(&tracee);
+
+                    // Record the fact that we saw this PID try to start a process
+                    //
+                    // NOTE: It may not succeed (we'll find out in the matching
+                    // SyscallExitStop)
+                    match make_command(&bin, &args, env, cwd) {
+                        Err(msg) => {
+                            println!("Error decoding strings to build command: {:?}", msg);
+                        }
+                        Ok(cmd) => {
+                            process_state.insert(pid.as_raw() as i32, ProcessState::TryExec(cmd));
+                        }
+                    }
+                }
+            }
+            pete::Stop::SyscallExitStop(pid) => {
+                let syscall_num = regs.orig_rax;
+                match syscalls.get(&syscall_num) {
+                    None => {}
+                    Some(syscall) => {
+                        let res = regs.rax as i32;
+                        if syscall == "execve" {
+                            let ipid = pid.as_raw() as i32;
+                            if res != 0 {
+                                // Exec failed, remove the binding
+                                process_state.remove(&ipid);
+                            } else {
+                                // Exec succeeded, update the binding so that we
+                                // know that we have execed this command
+                                match process_state.remove(&ipid) {
+                                    None => {
+                                        println!("Missing expected exec command for process id {}", ipid);
+                                    }
+                                    Some(ProcessState::TryExec(rc)) => {
+                                        process_state.insert(ipid, ProcessState::FinishExec(rc));
+                                    }
+                                    Some(ProcessState::FinishExec(rc)) => {
+                                        println!("Unexpected finish event for already finished command {:?}", rc);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            pete::Stop::Exiting(pid, exit_code) => {
+                let ipid = pid.as_raw() as i32;
+                match process_state.remove(&ipid) {
+                    None => {
+                        // We weren't tracking this process
+                    }
+                    Some(ProcessState::TryExec(_)) => {
+                        // The process tried to exec some command but never succeeded
+                    }
+                    Some(ProcessState::FinishExec(rc)) => {
+                        // The process successfully execed - see if we want to do anything with it
+                        let cmd_path = Path::new(&rc.bin);
+                        let mut has_compile_only_flag = false;
+                        for arg in &rc.args {
+                            has_compile_only_flag = has_compile_only_flag || arg == "-c";
+                        }
+                        let should_make_bc = match cmd_path.file_name() {
+                            None => { false }
+                            Some(cmd_file_name) => {
+                                is_compile_command_name(cmd_file_name) && has_compile_only_flag
+                            }
+                        };
+
+                        if should_make_bc {
+                            // If this is a command we can build bitcode for, do
+                            // it.  We wait until the execed process exits
+                            // because we need the original object file to exist
+                            // (so that we can attach the bitcode).
+                            //
+                            // NOTE: We could also check the exit_code and just
+                            // not do anything if it is non-zero.
+                            let bc_command = OsString::from("clang");
+                            // We drop the first argument because it is just the
+                            // original command name
+                            let (_, rest_args) = rc.args.split_at(1);
+                            match build_bitcode_compile_only(&bc_command, rest_args, &rc.cwd) {
+                                Err(err) => { println!("Error building bitcode: {:?}", err) }
+                                Ok(_) => {}
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
+
+        ptracer.restart(tracee, pete::Restart::Syscall)?;
     }
 
     Ok(())
 }
 
-/// A data structure for tracking the bitcode files generated (and the files
-/// that they map to in the original build)
-struct FileTracker {
-    bitcode : HashMap<OsString,OsString>
+fn decode_raw_string(rs : &RawString) -> anyhow::Result<OsString> {
+    match rs {
+        RawString::SafeString(s) => { Ok(OsString::from(s)) }
+        RawString::BinaryString(bytes) => { Ok(OsStringExt::from_vec(bytes.clone())) }
+        RawString::UnreadableMemoryAddress(addr) => { Err(anyhow::Error::new(BitcodeError::UnreadableMemoryAddress(*addr))) }
+    }
 }
 
-fn new() -> FileTracker {
-    let hm = HashMap::new();
-    FileTracker { bitcode : hm }
-}
+fn make_command(bin : &RawString, args : &[RawString], env : anyhow::Result<Vec<u8>>, cwd : anyhow::Result<PathBuf>) -> anyhow::Result<RunCommand> {
+    let mut os_args = Vec::new();
+    for arg in args {
+        os_args.push(decode_raw_string(arg)?);
+    }
 
-fn add_file_mapping(ft : &mut FileTracker, orig_file : OsString, new_file : OsString) {
-    ft.bitcode.insert(orig_file, new_file);
-}
-
-fn get_file_mapping<'a>(ft : &'a FileTracker, orig_file : &OsStr) -> Option<&'a OsString>{
-    ft.bitcode.get(orig_file)
+    let cmd = RunCommand { bin : decode_raw_string(bin)?, args : os_args, env : env?, cwd : cwd? };
+    Ok(cmd)
 }
