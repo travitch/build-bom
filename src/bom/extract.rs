@@ -71,7 +71,7 @@ pub fn extract_bitcode_entrypoint(extract_options : &ExtractOptions) -> anyhow::
             llvm_link.push(OsString::from(suffix));
         }
     }
-    match Command::new(&llvm_link).args(&llvm_link_args).current_dir(&tmp_dir).spawn() {
+    match Command::new(&llvm_link).args(&llvm_link_args).spawn() {
         Err(msg) => {
             let llvm_link_str = llvm_link.into_string().unwrap();
             return Err(anyhow::Error::new(ExtractError::ErrorRunningCommand(llvm_link_str, llvm_link_args, msg)));
