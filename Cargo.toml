@@ -26,4 +26,4 @@ sha2 = "^0.9"
 hex = "0.4"
 
 [patch.crates-io]
-pete = { git = "http://github.com/travitch/pete", branch = "tr/vfork-child-fix" }
+pete = { git = "http://github.com/travitch/pete", branch = "master" }
