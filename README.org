@@ -28,11 +28,9 @@ $ build-bom extract-bitcode /path/to/binary --output=/tmp/output.bc
 
 #+END_SRC
 
-In the first step, the tool acts as a wrapper around the real build system.  There are a few options available for tracing; the normal build system command is specified after the argument terminator (~--~).  The tracer is agnostic to the build system (as long as it isn't running as a separate service).
+In the first step, the tool acts as a wrapper around the real build system.  It runs the build system and, if it observes any compilation commands, it runs an extra build of the source file using clang to generate bitcode.  It attaches bitcode to object files, and then resumes the build.
 
-In the next step, the collected trace is normalized according to some default rules to make the trace more compact and easier to read.  The normalization process primarily removes failed system calls that some build systems speculatively execute (e.g., testing multiple possible locations for the compiler).  Each normalization pass can be individually selected; if none are explicitly selected, a useful set of defaults are applied.
-
-In the third step, the trace is analyzed and partially replayed to build LLVM bitcode from the project.  The resulting bitcode is suitable for analysis or verification, as desired.
+In the next step, the tool extracts all of the accumulated bitcode.
 
 ** Bitcode Generation Options
 
@@ -40,11 +38,21 @@ The ~bitcode~ command has a number of options that may be useful in various cont
 
 - ~--dry-run~: Replays the build without taking action
 - ~--clang~: Specify the full name (or path if desired) of a clang binary to use
-- ~--llvm-tool-suffix~: Specify a suffix to be appended to all LLVM command line tool names (e.g., ~llvm-ar~); this is useful if LLVM commands are versioned on your system
+- ~--llvm-tool-suffix~: Specify a suffix to be appended to all LLVM command line tool names (e.g., ~llvm-link~); this is useful if LLVM commands are versioned on your system
 
 * Design
 
-The tool uses low-level operating system services to observe builds and record their actions.  On Linux, it uses ~ptrace~ to record all relevant system calls into a log.  The tracing is designed to capture all of the information necessary to replay a build.  It currently doesn't capture everything (especially file move and directory operations), but will be extended as-needed.  Beyond system calls, it also captures the environment and working directory of each executed command.
+The tool uses low-level operating system services to observe builds and record their actions.  On Linux, it uses ~ptrace~ to observe every system call.  When a source compilation command is observed, the tool generates the corresponding bitcode file using clang.  It attaches the bitcode file to the object file, allowing bitcode to be accumulated as a side effect of the build.  At every stage, bitcode remains attached to build artifacts to ensure it is not lost.
+
+There are four key observations enabling this approach to bitcode collection:
+1. Whenever we see the original build system compile a C/C++ file, we know we need to make the corresponding bitcode file
+2. We can attach arbitrary extra data (e.g., bitcode) to object files in extra ELF sections
+3. ELF sections containing data without special meaning are concatenated by the linker
+4. Standard tar files can be concatenated to produce a valid tar file that is the union of their contents
+
+We wrap our generated bitcode in singleton tar files and allow the linker to accumulate them for us. When we want to collect aggregated bitcode for executable artifacts, we simply extract the tar file from their special LLVM bitcode ELF sections, extract the collected bitcode, and link it together with ~llvm-link~.
+
+This tool is also able to record all relevant system calls into a log.  The tracing is designed to capture all of the information necessary to replay a build.  It currently doesn't capture everything (especially file move and directory operations), but will be extended as-needed.  Beyond system calls, it also captures the environment and working directory of each executed command.
 
 The tool currently supports Linux, but is designed so that it will be modular enough to have separate tracing implementations for MacOS and Windows, while sharing the rest of the code.
 
@@ -56,6 +64,10 @@ Earlier tools in this space include
 - [[https://github.com/SRI-CSL/gllvm][gllvm]]
 
 These tools act as drop-in replacements that pretend to be your normal compiler and linker, but run additional commands to also compile the program to LLVM bitcode.  These tools are very effective, but can require significant understanding and re-engineering of build systems to integrate.  The ~build-bom~ tool is designed to support build system analysis without any modifications to the existing build system (and ideally without ever even looking at it).
+
+** Caveats
+
+It is not possible to take advantage of parallel builds while using this tool, as all system calls in the entire build tree are serialized through a single tracing process.
 
 * Full Example
 
