@@ -58,16 +58,37 @@ The tool currently supports Linux, but is designed so that it will be modular en
 
 ** Related Tools
 
-Earlier tools in this space include
+There are a number of tools in the space of build interposition for the purpose of instrumentation, build modification, or bitcode generation. Most are based on acting as wrappers around standard compilers either through explicit modification of the build system or by placing themselves earlier in the ~PATH~ as aliases to real build tools.
 
-- [[https://github.com/travitch/whole-program-llvm][wllvm]]
-- [[https://github.com/SRI-CSL/gllvm][gllvm]]
+- Tools like [[https://github.com/travitch/whole-program-llvm][wllvm]] and [[https://github.com/SRI-CSL/gllvm][gllvm]] solve the problem of wrapping compiler commands to generate LLVM, but require manual modifications to the build system in order to invoke them.
+- Tools like [[https://github.com/rizsotto/Bear][Bear]] and [[https://github.com/trailofbits/blight][blight]] provide general mechanisms for interposing on build commands by pretending to be a normal compiler earlier in your PATH.  Bear additionally provides another mode based on using ~LD_PRELOAD~ to hook calls to ~execve~.
+- Other tools record builds and replay them
 
-These tools act as drop-in replacements that pretend to be your normal compiler and linker, but run additional commands to also compile the program to LLVM bitcode.  These tools are very effective, but can require significant understanding and re-engineering of build systems to integrate.  The ~build-bom~ tool is designed to support build system analysis without any modifications to the existing build system (and ideally without ever even looking at it).
+These tools can be very effective, but have some issues with more complex build systems:
+- Scripts that wrap compiler commands can have difficulty successfully getting through complex configure scripts that e.g., do aggressive version sniffing
+- While configure script difficulties can be sometimes avoided by configuring with the real compiler and replacing or interposing the real build commands after the fact, it doesn't always work
+  - Build systems that record absolute paths at configure time are difficult to modify completely
+  - Some build systems run additional configure scripts as part of the build process, which are again difficult to pass using interposition
+- Using ~LD_PRELOAD~ to hook ~execve~ can be very effective, but difficult, as some build systems rely on failed ~execve~ calls to perform ~PATH~ searches; it is difficult to know which commands succeed, as ~execve~ never returns in those contexts
+- The ~LD_PRELOAD~ approach does not work for statically-linked compilers (so Bear has a fallback to wrapper scripts)
+- Some types of multi-stage build require that all intermediate results actually be built and be executable (e.g., if a build creates a code generator and uses it for later build stages)
+- Replaying builds based solely on compiler commands works for simple builds, but fails when build systems create and delete directories during the build (or make other interesting environmental changes) that make consistent replay very difficult
+
+As a whole, these tools tend to require significant effort in build system understanding and modification to work on more complex codebases.  The build-bom tool is designed to eliminate any need for build system modification to achieve its goals (primarily LLVM bitcode generation, but potentially arbitrary build modifications).  In contrast to the other tools in this space, it monitors and interposes on the build system at the level of ~ptrace~.
+
+- By working at the level of ~execve~, it can observe when real build tools are called, no matter what names the build system thinks they actually have (e.g., if the build system itself uses build tool wrappers)
+- By working directly at the syscall level (rather than ~LD_PRELOAD~), it works on both static and dynamically-linked build tools
+- By working at the level of ~execve~, build-bom never needs to implement any shell lexing logic, as the shell has already lexed all of the arguments
+- By working at the ~ptrace~ level, build-bom is able to determine which calls to ~execve~ actually succeed
+- Moreover, it can delay action until *after* build steps succeed (since it can observe when execed processes terminate, not just when they are about to start)
+- The build-bom tool is able to maintain persistent state for an entire build without external storage, as a single process is able to view all build steps
+- Configure scripts are never a problem (at any stage of the build) because the real build always runs
+- Multi-stage builds always work because intermediate tools are build and are executable
 
 ** Caveats
 
-It is not possible to take advantage of parallel builds while using this tool, as all system calls in the entire build tree are serialized through a single tracing process.
+- It is not possible to take advantage of parallel builds while using this tool, as all system calls in the entire build tree are serialized through a single tracing process
+- Build steps that rely on input our output redirection through pipes are very difficult to replicate, since their targets are not observable without modeling the calling process file descriptor connection logic
 
 * Full Example
 
