@@ -51,6 +51,7 @@ pub enum Event {
     PipeInputOrOutput(RunCommand),
     MultipleInputsWithImplicitOutput(OsString,Vec<OsString>),
     BuildFailureSkippedBitcode(RunCommand, i32),
+    BuildFailureUnknownEffect(RunCommand, i32),
     SkippingAssembleOnlyCommand(RunCommand),
     BitcodeCompileError(PathBuf, Vec<OsString>,Vec<u8>,Vec<u8>,Option<i32>),
     BitcodeAttachError(PathBuf, Vec<OsString>,Vec<u8>,Vec<u8>,Option<i32>)
@@ -275,6 +276,7 @@ struct SummaryStats {
     num_pipe_io : usize,
     unresolved_implicit_outputs : usize,
     build_failures_skipping_bitcode : usize,
+    build_failures_unknown_effect : usize,
     skipping_assemble_only : usize,
     bitcode_compile_errors : usize,
     bitcode_attach_errors : usize
@@ -284,6 +286,7 @@ fn collect_events(stream_errors : bool, chan : mpsc::Receiver<Option<Event>>) ->
     let mut summary = SummaryStats { num_pipe_io : 0,
                                      unresolved_implicit_outputs : 0,
                                      build_failures_skipping_bitcode : 0,
+                                     build_failures_unknown_effect : 0,
                                      skipping_assemble_only : 0,
                                      bitcode_compile_errors : 0,
                                      bitcode_attach_errors : 0
@@ -313,6 +316,12 @@ fn collect_events(stream_errors : bool, chan : mpsc::Receiver<Option<Event>>) ->
                         summary.build_failures_skipping_bitcode += 1;
                         if stream_errors {
                             println!("Skipping bitcode generation due to failed compile command '{:?} {:?} = {}'", cmd.bin, cmd.args, exit_code);
+                        }
+                    }
+                    Event::BuildFailureUnknownEffect(cmd, exit_code) => {
+                        summary.build_failures_unknown_effect += 1;
+                        if stream_errors {
+                            println!("Failed compile command may affect bitcode coverage '{:?} {:?} = {}'", cmd.bin, cmd.args, exit_code);
                         }
                     }
                     Event::SkippingAssembleOnlyCommand(cmd) => {
@@ -417,7 +426,19 @@ fn handle_process_exit(chan : &mut mpsc::Sender<Option<Event>>, pid : pete::Pid,
         }
         Some(ProcessState::FinishExec(rc)) => {
             if exit_code != 0 {
-                let _rc = chan.send(Some(Event::BuildFailureSkippedBitcode(rc, exit_code)));
+                let cmd_path = Path::new(&rc.bin);
+                match cmd_path.file_name() {
+                    None => {
+                        let _rc = chan.send(Some(Event::BuildFailureUnknownEffect(rc, exit_code)));
+                    }
+                    Some(cmd_file_name) => {
+                        if clang_support::is_compile_command_name(cmd_file_name) {
+                            let _rc = chan.send(Some(Event::BuildFailureSkippedBitcode(rc, exit_code)));
+                        } else {
+                            let _rc = chan.send(Some(Event::BuildFailureUnknownEffect(rc, exit_code)));
+                        };
+                    }
+                };
                 return;
             }
             // The process successfully execed - see if we want to do anything with it
