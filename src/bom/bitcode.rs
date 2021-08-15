@@ -30,7 +30,7 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<(
     let (mut sender, receiver) = mpsc::channel();
     let stream_output = bitcode_options.verbose;
     let event_consumer = thread::spawn(move || { collect_events(stream_output, receiver) });
-    generate_bitcode(&mut sender, ptracer)?;
+    generate_bitcode(&mut sender, ptracer, bitcode_options.bcout_path.as_ref())?;
 
     // Send a token to shut down the event collector thread
     sender.send(None)?;
@@ -56,7 +56,12 @@ pub enum Event {
     BitcodeAttachError(PathBuf, Vec<OsString>,Vec<u8>,Vec<u8>,Option<i32>)
 }
 
-fn build_bitcode_compile_only(chan : &mut mpsc::Sender<Option<Event>>, bc_command : &OsStr, args : &[OsString], cwd : &Path) -> anyhow::Result<()> {
+fn build_bitcode_compile_only(chan : &mut mpsc::Sender<Option<Event>>,
+                              bc_command : &OsStr,
+                              args : &[OsString],
+                              cwd : &Path,
+                              bcdir : Option<&PathBuf>
+) -> anyhow::Result<()> {
     let mut orig_target = None;
     let mut new_target = OsString::from("");
     let mut modified_args = Vec::new() as Vec<OsString>;
@@ -76,7 +81,15 @@ fn build_bitcode_compile_only(chan : &mut mpsc::Sender<Option<Event>>, bc_comman
                 }
                 Some(target) => {
                     orig_target = Some(PathBuf::from(&target).into_os_string());
-                    let mut target_path = PathBuf::from(&target);
+                    let mut target_path = match bcdir {
+                        None => PathBuf::from(&target),
+                        Some(p) => {
+                            let mut pp = PathBuf::from(&p);
+                            pp.push(&PathBuf::from(&target).file_name()
+                                    .expect("target is not a file"));
+                            pp
+                        }
+                    };
                     target_path.set_extension("bc");
                     new_target = OsString::from(target_path.clone());
                     modified_args.push(target_path.into_os_string());
@@ -208,7 +221,10 @@ pub enum BitcodeError {
 /// We pass in the working directory in which the objects were constructed so
 /// that we can generate appropriate commands (in terms of absolute paths) so
 /// that we don't need to worry about where we are replaying the build from.
-fn attach_bitcode(chan : &mut mpsc::Sender<Option<Event>>, cwd : &Path, orig_target : &OsString, bc_target : &OsString) -> anyhow::Result<()> {
+fn attach_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
+                  cwd : &Path,
+                  orig_target : &OsString,
+                  bc_target : &OsString) -> anyhow::Result<()> {
     let object_path = to_absolute(cwd, orig_target);
     let bc_path = to_absolute(cwd, bc_target);
 
@@ -404,9 +420,18 @@ fn handle_exit_execve(pid : pete::Pid, regs : pete::Registers, process_state : &
 
 /// If the exited process was an exec, see if we need to build bitcode for it.
 ///
-/// We wait for the process to exit before building the bitcode because we need
-/// the output object file to exist.
-fn handle_process_exit(chan : &mut mpsc::Sender<Option<Event>>, pid : pete::Pid, exit_code : i32, process_state : &mut HashMap<i32, ProcessState>) {
+/// This is done here rather than when the syscall exits because the
+/// syscall exits back to the original program, even for an execve;
+/// the actual exec will be a separate ptrace event that will occur a
+/// short time later, but the post_process_actions should only be run
+/// when the output file exists (and therefore after the actual exec
+/// completes.
+fn handle_process_exit(chan : &mut mpsc::Sender<Option<Event>>,
+                       pid : pete::Pid,
+                       exit_code : i32,
+                       process_state : &mut HashMap<i32, ProcessState>,
+                       bcout_path : Option<&PathBuf>
+) {
     let ipid = pid.as_raw() as i32;
     match process_state.remove(&ipid) {
         None => {
@@ -420,63 +445,76 @@ fn handle_process_exit(chan : &mut mpsc::Sender<Option<Event>>, pid : pete::Pid,
                 let _rc = chan.send(Some(Event::BuildFailureSkippedBitcode(rc, exit_code)));
                 return;
             }
-            // The process successfully execed - see if we want to do anything with it
-            let cmd_path = Path::new(&rc.bin);
-            let mut has_compile_only_flag = false;
-            let mut has_pipe_io = false;
-            let mut is_assemble_only = false;
-            for arg in &rc.args {
-                has_compile_only_flag = has_compile_only_flag || arg == "-c";
-                // We want to recognize cases where the compilation
-                // input is stdin or the output is stdout; we can't
-                // replicate those build steps since we don't know
-                // where either is really going to/coming from.
-                has_pipe_io = has_pipe_io || arg == "-";
-                // We could potentially track builds that assemble-only, but the
-                // worry is that gnarly things happen to artifacts constructed
-                // that way that we might miss (e.g., evil mangler scripts whose
-                // effects can't be mirrored on llvm assembly).
-                //
-                // For now, ignore them.  This could be guarded behind an
-                // option.
-                is_assemble_only = is_assemble_only || arg == "-S";
-            }
-            let should_make_bc = match cmd_path.file_name() {
-                None => { false }
-                Some(cmd_file_name) => {
-                    clang_support::is_compile_command_name(cmd_file_name) && has_compile_only_flag && !has_pipe_io && !is_assemble_only
-                }
-            };
-
-            if should_make_bc {
-                // If this is a command we can build bitcode for, do
-                // it.  We wait until the execed process exits
-                // because we need the original object file to exist
-                // (so that we can attach the bitcode).
-                let bc_command = OsString::from("clang");
-                // We drop the first argument because it is just the
-                // original command name
-                let (_, rest_args) = rc.args.split_at(1);
-                match build_bitcode_compile_only(chan, &bc_command, rest_args, &rc.cwd) {
-                    Err(err) => { println!("Error building bitcode: {:?}", err) }
-                    Ok(_) => {}
-                }
-            } else {
-                if has_pipe_io {
-                    // Ignore send failures... that really shouldn't happen and
-                    // we don't want to kill the tracer thread.
-                    let _res = chan.send(Some(Event::PipeInputOrOutput(rc.clone())));
-                }
-
-                if is_assemble_only {
-                    let _res = chan.send(Some(Event::SkippingAssembleOnlyCommand(rc)));
-                }
-            }
+            // The process successfully exec'd - see if we want to do anything with it
+            post_process_actions(rc, chan, bcout_path);
         }
     }
 }
 
-fn generate_bitcode(chan : &mut mpsc::Sender<Option<Event>>, mut ptracer : pete::Ptracer) -> anyhow::Result<()> {
+/// Determine what actions should be taken on the successful execution
+/// completion of a build process action.
+fn post_process_actions(rc : RunCommand,
+                        chan : &mut mpsc::Sender<Option<Event>>,
+                        bcout_path : Option<&PathBuf>
+) {
+    let cmd_path = Path::new(&rc.bin);
+    let mut has_compile_only_flag = false;
+    let mut has_pipe_io = false;
+    let mut is_assemble_only = false;
+    for arg in &rc.args {
+        has_compile_only_flag = has_compile_only_flag || arg == "-c";
+        // We want to recognize cases where the compilation
+        // input is stdin or the output is stdout; we can't
+        // replicate those build steps since we don't know
+        // where either is really going to/coming from.
+        has_pipe_io = has_pipe_io || arg == "-";
+        // We could potentially track builds that assemble-only, but the
+        // worry is that gnarly things happen to artifacts constructed
+        // that way that we might miss (e.g., evil mangler scripts whose
+        // effects can't be mirrored on llvm assembly).
+        //
+        // For now, ignore them.  This could be guarded behind an
+        // option.
+        is_assemble_only = is_assemble_only || arg == "-S";
+    }
+    let should_make_bc = match cmd_path.file_name() {
+        None => { false }
+        Some(cmd_file_name) => {
+            clang_support::is_compile_command_name(cmd_file_name) && has_compile_only_flag && !has_pipe_io && !is_assemble_only
+        }
+    };
+
+    if should_make_bc {
+        // If this is a command we can build bitcode for, do
+        // it.  We wait until the exec'd process exits
+        // because we need the original object file to exist
+        // (so that we can attach the bitcode).
+        let bc_command = OsString::from("clang");
+        // We drop the first argument because it is just the
+        // original command name
+        let (_, rest_args) = rc.args.split_at(1);
+        match build_bitcode_compile_only(chan, &bc_command, rest_args, &rc.cwd, bcout_path) {
+            Err(err) => { println!("Error building bitcode: {:?}", err) }
+            Ok(_) => {}
+        }
+    } else {
+        if has_pipe_io {
+            // Ignore send failures... that really shouldn't happen and
+            // we don't want to kill the tracer thread.
+            let _res = chan.send(Some(Event::PipeInputOrOutput(rc.clone())));
+        }
+
+        if is_assemble_only {
+            let _res = chan.send(Some(Event::SkippingAssembleOnlyCommand(rc)));
+        }
+    }
+}
+
+
+fn generate_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
+                    mut ptracer : pete::Ptracer,
+                    bcout_path : std::option::Option<&PathBuf>
+) -> anyhow::Result<()> {
     let mut process_state = HashMap::new();
     let syscalls = load_syscalls();
     // We want to observe execve syscalls. After a process (successfully) execs
@@ -505,7 +543,7 @@ fn generate_bitcode(chan : &mut mpsc::Sender<Option<Event>>, mut ptracer : pete:
                 }
             }
             pete::Stop::Exiting(pid, exit_code) => {
-                handle_process_exit(chan, pid, exit_code, &mut process_state);
+                handle_process_exit(chan, pid, exit_code, &mut process_state, bcout_path);
             }
             _ => {}
         }
