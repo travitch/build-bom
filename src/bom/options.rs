@@ -32,8 +32,6 @@ pub struct ExtractOptions {
 pub struct BitcodeOptions {
     // #[structopt(help="A file containing traced build actions")]
     // pub input : PathBuf,
-    #[structopt(long="clang", help="Name of the clang binary to use to generate bitcode (default: `clang`)")]
-    pub clang_path : Option<PathBuf>,
     #[structopt(short="v", long="verbose", help="Generate verbose output")]
     pub verbose : bool,
     #[structopt(last = true, help="The build command to run")]
