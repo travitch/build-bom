@@ -1,3 +1,80 @@
+// Overall Design
+// ==============
+//
+// The generate-bitcode command will execute the specified build
+// command (e.g. make) within a process tracing mechanism (provided by
+// the "pete" package).  Each trace event is examined to see if it is
+// of interest relative to the generation of a bitcode file:
+//
+// Event:
+//
+// * syscall_enter -- if this is an execve syscall, the execve target
+//                    may be a clang invocation on a source code file.
+//                    At syscall entry, the cmdline arguments are
+//                    captured for that determination later.
+//
+// * syscall_exit -- if this is the exit from an execve syscall and it
+//                   failed, the preserved arguments from above can be
+//                   discarded.  Note that even if this is an execve,
+//                   the syscall has returned to the *original*
+//                   executable (albeit to libc library code therein),
+//                   so this does *not* represent successfull
+//                   completion of the exec'd target (which may or may
+//                   not be clang).  Thus, a successful syscall_exit
+//                   leaves the cmdline argument information available
+//                   and is otherwise ignored.
+//
+// * Exec -- this is the trace that records the actual change of
+//           executable code to the new target.  This is actually
+//           ignored below and just described here for completeness.
+//
+// * Exiting -- this is the trace that is called when the process
+//              itself is exiting and cleaning up.  It is at this
+//              point that the cmdline arguments for the process and
+//              are looked up and evaluated: if they were an LLVM
+//              compilation, an new invocation of that command is
+//              executed with the arguments altered to cause
+//              generation of an LLVM bitcode file instead.  If the
+//              LLVM bitcode file is generated successfully, it is
+//              wrapped in a tar file and then added to the object
+//              file as an additional ELF section. Conveniently,
+//              tarfiles can be concatenated together, which is the
+//              action that will automatically happen during linking
+//              operations: the final library or executable will have
+//              this ELF section that is a tarfile containing all the
+//              bitcode files generated from the sources.  Note that
+//              this also works in the partial-rebuild situation where
+//              only some sources are rebuilt to regenerate the target
+//              library or executable.
+//
+//              Note that there may be multiple exec events for a
+//              specific process. If there was previously an exec for
+//              this same process, it indicates that the initially
+//              exec'd command is itself invoking an exec.  An example
+//              of this is:
+//
+//                $ cat localbin/clang++
+//                #!/bin/sh
+//                : -- various code processing arguments --
+//                exec actual/path/to/clang++ ...modified-arguments...
+//
+//              Or an example from cmake:
+//
+//                /bin/sh -c "cd local/source/path; clang++ ....
+//
+//              These wrappers and execs may be nested. It is the
+//              final exec which will create the needed output file,
+//              but it is not necessarily the initial exec nor the
+//              final which has the arguments available.
+//
+// When the extract-bitcode command is run, it retrieves the tarfile
+// from the special ELF section created during the generate-bitcode
+// phase and extracts the requested bitcode file(s) from that section.
+// This means that the extract-bitcode command can be run multiple
+// times and only needs access to the final object/library/executable
+// to extract any requested bitcode file; the build tree no longer
+// needs to be present.
+
 use std::collections::HashMap;
 use std::path::{Path,PathBuf};
 use std::io::Read;
