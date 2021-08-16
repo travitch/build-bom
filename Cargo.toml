@@ -5,6 +5,14 @@ authors = ["Tristan Ravitch <tristan@ravit.ch>"]
 license = "MIT OR Apache-2.0"
 edition = "2018"
 
+[[bin]]
+name = "build-bom"
+path = "src/main.rs"
+
+[lib]
+name = "bom"
+path = "src/lib.rs"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -27,3 +35,6 @@ sha2 = "^0.9"
 hex = "0.4"
 regex = "1"
 lazy_static = "1"
+
+[dev-dependencies]
+xshell = "0.1"
