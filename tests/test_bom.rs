@@ -1,6 +1,6 @@
 use std::path::Path;
 use tempfile::tempdir;
-use xshell::{Cmd, cmd, pushd};
+use xshell::{Cmd, pushd};
 
 use bom;
 use bom::bom::options::{Options,Subcommand,BitcodeOptions,ExtractOptions};
@@ -11,13 +11,12 @@ fn test_zlib() -> anyhow::Result<()> {
     let filename = "zlib-1.2.11.tar.gz";
     let dir_name = "zlib-1.2.11";
     let path = Path::new("tests/sources").join(filename);
-    let abs_src = std::fs::canonicalize(path.as_path())?;
-    print!("Checking if tarball exists\n");
-    if !abs_src.exists() {
-        print!("Fetching tarball\n");
-        let cmd = Cmd::new("wget").arg("-O").arg(path).arg(url);
+    if !path.exists() {
+        let cmd = Cmd::new("wget").arg("-O").arg(path.as_path()).arg(url);
         cmd.run()?;
     }
+
+    let abs_src = std::fs::canonicalize(path.as_path())?;
 
     let tdir = tempdir()?;
     let _push1 = pushd(tdir.path())?;
