@@ -624,9 +624,14 @@ fn generate_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
         match tracee.stop {
             pete::Stop::SyscallEnterStop(pid) => {
                 let rax = regs.orig_rax;
-                let syscall = syscalls.get(&rax).unwrap();
-                if syscall == "execve" {
-                    handle_start_execve(&mut tracee, pid, regs, &mut process_state);
+                match syscalls.get(&rax) {
+                    // Unhandled syscall; we don't really care since we only really need execve
+                    None => {}
+                    Some(syscall) => {
+                        if syscall == "execve" {
+                            handle_start_execve(&mut tracee, pid, regs, &mut process_state);
+                        }
+                    }
                 }
             }
             pete::Stop::SyscallExitStop(pid) => {
