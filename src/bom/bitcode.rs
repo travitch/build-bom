@@ -107,7 +107,9 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<(
     let (mut sender, receiver) = mpsc::channel();
     let stream_output = bitcode_options.verbose;
     let event_consumer = thread::spawn(move || { collect_events(stream_output, receiver) });
-    generate_bitcode(&mut sender, ptracer, bitcode_options.bcout_path.as_ref())?;
+    let clang_path = bitcode_options.clang_path.as_ref().map(|s| OsString::from(s.as_path().as_os_str()))
+                                                        .unwrap_or(OsString::from("clang"));
+    generate_bitcode(&mut sender, ptracer, clang_path.as_ref(), bitcode_options.bcout_path.as_ref())?;
 
     // Send a token to shut down the event collector thread
     sender.send(None)?;
@@ -516,6 +518,7 @@ fn handle_process_exit(chan : &mut mpsc::Sender<Option<Event>>,
                        pid : pete::Pid,
                        exit_code : i32,
                        process_state : &mut HashMap<i32, ProcessState>,
+                       clang_path : &OsStr,
                        bcout_path : Option<&PathBuf>
 ) {
     let ipid = pid.as_raw() as i32;
@@ -544,7 +547,7 @@ fn handle_process_exit(chan : &mut mpsc::Sender<Option<Event>>,
                 return;
             }
             // The process successfully exec'd - see if we want to do anything with it
-            post_process_actions(rc, chan, bcout_path);
+            post_process_actions(rc, chan, clang_path, bcout_path);
         }
     }
 }
@@ -553,6 +556,7 @@ fn handle_process_exit(chan : &mut mpsc::Sender<Option<Event>>,
 /// completion of a build process action.
 fn post_process_actions(rc : RunCommand,
                         chan : &mut mpsc::Sender<Option<Event>>,
+                        clang_path : &OsStr,
                         bcout_path : Option<&PathBuf>
 ) {
     let cmd_path = Path::new(&rc.bin);
@@ -587,11 +591,11 @@ fn post_process_actions(rc : RunCommand,
         // it.  We wait until the exec'd process exits
         // because we need the original object file to exist
         // (so that we can attach the bitcode).
-        let bc_command = OsString::from("clang");
+        //
         // We drop the first argument because it is just the
         // original command name
         let (_, rest_args) = rc.args.split_at(1);
-        match build_bitcode_compile_only(chan, &bc_command, rest_args, &rc.cwd, bcout_path) {
+        match build_bitcode_compile_only(chan, clang_path, rest_args, &rc.cwd, bcout_path) {
             Err(err) => { println!("Error building bitcode: {:?}", err) }
             Ok(_) => {}
         }
@@ -611,10 +615,12 @@ fn post_process_actions(rc : RunCommand,
 
 fn generate_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
                     mut ptracer : pete::Ptracer,
+                    clang_path : &OsStr,
                     bcout_path : std::option::Option<&PathBuf>
 ) -> anyhow::Result<()> {
     let mut process_state = HashMap::new();
     let syscalls = load_syscalls();
+
     // We want to observe execve syscalls. After a process (successfully) execs
     // a command we care about, we want to record that PID (along with the
     // arguments) and then, when that PID Exits, we want to generate bitcode and
@@ -646,7 +652,7 @@ fn generate_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
                 }
             }
             pete::Stop::Exiting(pid, exit_code) => {
-                handle_process_exit(chan, pid, exit_code, &mut process_state, bcout_path);
+                handle_process_exit(chan, pid, exit_code, &mut process_state, clang_path, bcout_path);
             }
             _ => {}
         }
