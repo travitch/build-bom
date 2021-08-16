@@ -1,12 +1,13 @@
 use std::path::Path;
 use tempfile::tempdir;
-use xshell::{Cmd, pushd};
+use xshell::{Cmd, cmd, pushd};
 
 use bom;
 use bom::bom::options::{Options,Subcommand,BitcodeOptions,ExtractOptions};
 
 #[test]
 fn test_zlib() -> anyhow::Result<()> {
+    let _pwd = cmd!("pwd");
     print!("Making sources dir");
     std::fs::create_dir_all("tests/sources")?;
     let url = "https://www.zlib.net/zlib-1.2.11.tar.gz";
