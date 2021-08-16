@@ -12,8 +12,9 @@ fn test_zlib() -> anyhow::Result<()> {
     let dir_name = "zlib-1.2.11";
     let path = Path::new("tests/sources").join(filename);
     let abs_src = std::fs::canonicalize(path.as_path())?;
-
+    print!("Checking if tarball exists\n");
     if !abs_src.exists() {
+        print!("Fetching tarball\n");
         let cmd = Cmd::new("wget").arg("-O").arg(path).arg(url);
         cmd.run()?;
     }
