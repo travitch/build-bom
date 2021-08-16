@@ -1,6 +1,6 @@
 use std::path::Path;
 use tempfile::tempdir;
-use xshell::{Cmd, pushd, mkdir_p};
+use xshell::{Cmd, pushd};
 
 use bom;
 use bom::bom::options::{Options,Subcommand,BitcodeOptions,ExtractOptions};
@@ -8,7 +8,7 @@ use bom::bom::options::{Options,Subcommand,BitcodeOptions,ExtractOptions};
 #[test]
 fn test_zlib() -> anyhow::Result<()> {
     print!("Making sources dir");
-    mkdir_p("tests/sources")?;
+    std::fs::create_dir_all("tests/sources")?;
     let url = "https://www.zlib.net/zlib-1.2.11.tar.gz";
     let filename = "zlib-1.2.11.tar.gz";
     let dir_name = "zlib-1.2.11";
