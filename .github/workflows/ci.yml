@@ -12,3 +12,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
+      - name: install test deps
+        run: sudo apt install clang-9 llvm-9 wget
+      - name: test
+        run: CLANG=clang-9 LLVM_LINK=llvm-link-9 cargo test

@@ -64,13 +64,7 @@ pub fn extract_bitcode_entrypoint(extract_options : &ExtractOptions) -> anyhow::
         llvm_link_args.push(OsString::from(bc_file));
     }
 
-    let mut llvm_link = OsString::from("llvm-link");
-    match &extract_options.llvm_tool_suffix {
-        None => {}
-        Some(suffix) => {
-            llvm_link.push(OsString::from(suffix));
-        }
-    }
+    let llvm_link = OsString::from(extract_options.llvm_link_path.as_ref().unwrap_or(&String::from("llvm-link")));
     match Command::new(&llvm_link).args(&llvm_link_args).spawn() {
         Err(msg) => {
             let llvm_link_str = llvm_link.into_string().unwrap();

@@ -84,6 +84,7 @@ use std::os::unix::ffi::OsStringExt;
 use std::sync::mpsc;
 use std::thread;
 use sha2::{Digest,Sha256};
+use thiserror::Error;
 
 use crate::bom::options::{BitcodeOptions};
 use crate::bom::syscalls::load_syscalls;
@@ -91,7 +92,15 @@ use crate::bom::event::RawString;
 use crate::bom::proc_read::{read_str_from,read_str_list_from,read_environment,read_cwd};
 use crate::bom::clang_support;
 
-pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<()> {
+#[derive(Error, Debug)]
+pub enum TracerError {
+    #[error("No tracee on top-level subprocess exit")]
+    NoTraceeOnExit,
+    #[error("Unexpected exit state on top-level subprocess exit")]
+    UnexpectedExitState(pete::Stop)
+}
+
+pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i32> {
     let (cmd0, args0) = bitcode_options.command.split_at(1);
     let cmd_path = which::which(OsString::from(&cmd0[0]))?;
     let mut resolved_command = Vec::new();
@@ -109,7 +118,7 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<(
     let event_consumer = thread::spawn(move || { collect_events(stream_output, receiver) });
     let clang_path = bitcode_options.clang_path.as_ref().map(|s| OsString::from(s.as_path().as_os_str()))
                                                         .unwrap_or(OsString::from("clang"));
-    generate_bitcode(&mut sender, ptracer, clang_path.as_ref(), bitcode_options.bcout_path.as_ref())?;
+    let mut ptracer1 = generate_bitcode(&mut sender, ptracer, clang_path.as_ref(), bitcode_options.bcout_path.as_ref())?;
 
     // Send a token to shut down the event collector thread
     sender.send(None)?;
@@ -122,7 +131,15 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<(
     println!(" {} bitcode compilation errors", summary.bitcode_compile_errors);
     println!(" {} errors attaching bitcode to object files", summary.bitcode_attach_errors);
 
-    Ok(())
+    let tracee = ptracer1.wait()?;
+    match tracee {
+        None => { Ok(0) }
+        Some(t) =>
+            match t.stop {
+                pete::Stop::Exiting(_, ec) => { Ok(ec) }
+                _ => { Err(anyhow::anyhow!(TracerError::UnexpectedExitState(t.stop))) }
+            }
+    }
 }
 
 #[derive(Debug)]
@@ -617,7 +634,7 @@ fn generate_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
                     mut ptracer : pete::Ptracer,
                     clang_path : &OsStr,
                     bcout_path : std::option::Option<&PathBuf>
-) -> anyhow::Result<()> {
+) -> anyhow::Result<pete::Ptracer> {
     let mut process_state = HashMap::new();
     let syscalls = load_syscalls();
 
@@ -660,7 +677,7 @@ fn generate_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
         ptracer.restart(tracee, pete::Restart::Syscall)?;
     }
 
-    Ok(())
+    Ok(ptracer)
 }
 
 fn decode_raw_string(rs : &RawString) -> anyhow::Result<OsString> {
