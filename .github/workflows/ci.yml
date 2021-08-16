@@ -13,6 +13,6 @@ jobs:
         with:
           command: build
       - name: install test deps
-        run: apt install clang-9 llvm-9
+        run: sudo apt install clang-9 llvm-9
       - name: test
         run: CLANG=clang-9 LLVM_LINK=llvm-link-9 cargo test
