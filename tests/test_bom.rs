@@ -7,15 +7,12 @@ use bom::bom::options::{Options,Subcommand,BitcodeOptions,ExtractOptions};
 
 #[test]
 fn test_zlib() -> anyhow::Result<()> {
-    let _pwd = cmd!("pwd");
-    print!("Making sources dir");
-    std::fs::create_dir_all("tests/sources")?;
     let url = "https://www.zlib.net/zlib-1.2.11.tar.gz";
     let filename = "zlib-1.2.11.tar.gz";
     let dir_name = "zlib-1.2.11";
     let path = Path::new("tests/sources").join(filename);
     let abs_src = std::fs::canonicalize(path.as_path())?;
-    print!("Fetching source");
+
     if !abs_src.exists() {
         let cmd = Cmd::new("wget").arg("-O").arg(path).arg(url);
         cmd.run()?;
