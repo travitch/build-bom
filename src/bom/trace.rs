@@ -4,12 +4,13 @@ use std::ffi::OsString;
 use std::thread;
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 
 use serde_json;
 use rmp_serde;
 use os_pipe::{pipe,PipeReader,PipeWriter};
 use core::borrow::Borrow;
-use pete::{Command, Ptracer, Restart, Stop, Tracee};
+use pete::{Ptracer, Restart, Stop, Tracee};
 
 use crate::bom::event::{RawEventType,TraceEvent,EnvID,Environment};
 use crate::bom::syscalls::{load_syscalls};
@@ -23,24 +24,20 @@ pub fn trace_entrypoint(trace_opts : &TraceOptions) -> anyhow::Result<()> {
     let thread_opts = trace_opts.output.clone();
     let (cmd, args) = trace_opts.command.split_at(1);
     let cmd_path = which::which(OsString::from(&cmd[0]))?;
-    let mut resolved_command = Vec::new();
-    resolved_command.push(String::from(cmd_path.to_str().unwrap()));
-    for a in args {
-        resolved_command.push(String::from(a));
-    }
-    let cmd = Command::new(resolved_command)?;
+    let mut cmd = Command::new(cmd_path);
+    cmd.args(args);
 
     let mut ptracer = Ptracer::new();
 
     // Tracee is in pre-exec ptrace-stop.
-    let tracee = ptracer.spawn(cmd);
-    match tracee {
-        Err(e) => {
-            println!("Error spawning tracee {}", e);
+    let _child = ptracer.spawn(cmd);
+    match ptracer.wait()? {
+        None => {
+            println!("Error spawning tracee");
         }
-        Ok(tracee1) => {
-            let root_pid = tracee1.pid.as_raw();
-            let event_reader = thread::spawn(move || { record_events(thread_opts, reader, root_pid) });
+        Some(tracee1) => {
+            let root_pid = tracee1.pid;
+            let event_reader = thread::spawn(move || { record_events(thread_opts, reader, root_pid.as_raw()) });
             ptracer.restart(tracee1, Restart::Syscall)?;
             let subprocess_writer = writer.try_clone()?;
             trace_events(syscalls, ptracer, subprocess_writer)?;
@@ -64,16 +61,19 @@ fn trace_events(syscalls : BTreeMap<u64, String>, mut ptracer : Ptracer, mut wri
         let regs = tracee.registers()?;
 
         match tracee.stop {
-            Stop::Fork(pid, new_pid) => {
-                write_event(&mut writer, &mut tracee, RawEventType::Fork { old_pid : pid.as_raw(), new_pid : new_pid.as_raw() })?;
+            Stop::Fork { new: new_pid } => {
+                let pid = tracee.pid.as_raw();
+                write_event(&mut writer, &mut tracee, RawEventType::Fork { old_pid : pid, new_pid : new_pid.as_raw() })?;
             }
-            Stop::Vfork(pid, new_pid) => {
-                write_event(&mut writer, &mut tracee, RawEventType::Fork { old_pid : pid.as_raw(), new_pid : new_pid.as_raw() })?;
+            Stop::Vfork { new: new_pid } => {
+                let pid = tracee.pid.as_raw();
+                write_event(&mut writer, &mut tracee, RawEventType::Fork { old_pid : pid, new_pid : new_pid.as_raw() })?;
             }
-            Stop::Exiting(pid, exit_code) => {
-                write_event(&mut writer, &mut tracee, RawEventType::Exit { pid : pid.as_raw(), exit_code : exit_code })?;
+            Stop::Exiting { exit_code } => {
+                let pid = tracee.pid.as_raw();
+                write_event(&mut writer, &mut tracee, RawEventType::Exit { pid : pid, exit_code : exit_code })?;
             }
-            Stop::SyscallEnterStop(..) => {
+            Stop::SyscallEnter => {
                 let rax = regs.orig_rax;
                 let syscall = syscalls.get(&rax).unwrap();
                 if syscall == "execve" {
@@ -110,7 +110,7 @@ fn trace_events(syscalls : BTreeMap<u64, String>, mut ptracer : Ptracer, mut wri
                     // println!("{:>16x}: [{}], {:?}", pc, syscall, tracee.stop);
                 };
             },
-            Stop::SyscallExitStop(..) => {
+            Stop::SyscallExit => {
                 // While we mostly don't care how system calls return, there
                 // will be a few cases where we do:
                 //
