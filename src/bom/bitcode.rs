@@ -81,6 +81,7 @@ use std::io::Read;
 use std::process;
 use std::ffi::{OsStr,OsString};
 use std::os::unix::ffi::OsStringExt;
+use std::process::Command;
 use std::sync::mpsc;
 use std::thread;
 use sha2::{Digest,Sha256};
@@ -103,15 +104,22 @@ pub enum TracerError {
 pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i32> {
     let (cmd0, args0) = bitcode_options.command.split_at(1);
     let cmd_path = which::which(OsString::from(&cmd0[0]))?;
-    let mut resolved_command = Vec::new();
-    resolved_command.push(String::from(cmd_path.to_str().unwrap()));
-    for a in args0 {
-        resolved_command.push(String::from(a));
-    }
-    let cmd = pete::Command::new(resolved_command)?;
+
+    let mut cmd = Command::new(cmd_path);
+    cmd.args(args0);
     let mut ptracer = pete::Ptracer::new();
-    let tracee = ptracer.spawn(cmd)?;
-    ptracer.restart(tracee, pete::Restart::Syscall)?;
+
+    // Spawn the subprocess for the command and start it (it starts off
+    // suspended to allow the ptracing process to attach)
+    let _child = ptracer.spawn(cmd);
+    match ptracer.wait()? {
+        None => {
+            println!("Error spawning tracee");
+        }
+        Some(tracee) => {
+            ptracer.restart(tracee, pete::Restart::Syscall)?;
+        }
+    }
 
     let (mut sender, receiver) = mpsc::channel();
     let stream_output = bitcode_options.verbose;
@@ -136,7 +144,7 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
         None => { Ok(0) }
         Some(t) =>
             match t.stop {
-                pete::Stop::Exiting(_, ec) => { Ok(ec) }
+                pete::Stop::Exiting { exit_code: ec } => { Ok(ec) }
                 _ => { Err(anyhow::anyhow!(TracerError::UnexpectedExitState(t.stop))) }
             }
     }
@@ -479,7 +487,7 @@ enum ProcessState {
 }
 
 /// Make an entry in the exec process state table if we can decode the command.
-fn handle_start_execve(tracee : &mut pete::Tracee, pid : pete::Pid, regs : pete::Registers, process_state : &mut HashMap<i32, ProcessState>) {
+fn handle_start_execve(tracee : &mut pete::Tracee, regs : pete::Registers, process_state : &mut HashMap<i32, ProcessState>) {
     let bin = read_str_from(tracee, regs.rdi);
     let args = read_str_list_from(tracee, regs.rsi);
     let env = read_environment(&tracee);
@@ -494,7 +502,7 @@ fn handle_start_execve(tracee : &mut pete::Tracee, pid : pete::Pid, regs : pete:
             println!("Error decoding strings to build command: {:?}", msg);
         }
         Ok(cmd) => {
-            process_state.insert(pid.as_raw() as i32, ProcessState::TryExec(cmd));
+            process_state.insert(tracee.pid.as_raw() as i32, ProcessState::TryExec(cmd));
         }
     }
 }
@@ -645,31 +653,31 @@ fn generate_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
     while let Ok(Some(mut tracee)) = ptracer.wait() {
         let regs = tracee.registers()?;
         match tracee.stop {
-            pete::Stop::SyscallEnterStop(pid) => {
+            pete::Stop::SyscallEnter => {
                 let rax = regs.orig_rax;
                 match syscalls.get(&rax) {
                     // Unhandled syscall; we don't really care since we only really need execve
                     None => {}
                     Some(syscall) => {
                         if syscall == "execve" {
-                            handle_start_execve(&mut tracee, pid, regs, &mut process_state);
+                            handle_start_execve(&mut tracee, regs, &mut process_state);
                         }
                     }
                 }
             }
-            pete::Stop::SyscallExitStop(pid) => {
+            pete::Stop::SyscallExit => {
                 let syscall_num = regs.orig_rax;
                 match syscalls.get(&syscall_num) {
                     None => {}
                     Some(syscall) => {
                         if syscall == "execve" {
-                            handle_exit_execve(pid, regs, &mut process_state);
+                            handle_exit_execve(tracee.pid, regs, &mut process_state);
                         }
                     }
                 }
             }
-            pete::Stop::Exiting(pid, exit_code) => {
-                handle_process_exit(chan, pid, exit_code, &mut process_state, clang_path, bcout_path);
+            pete::Stop::Exiting { exit_code }=> {
+                handle_process_exit(chan, tracee.pid, exit_code, &mut process_state, clang_path, bcout_path);
             }
             _ => {}
         }
