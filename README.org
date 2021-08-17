@@ -34,11 +34,16 @@ In the next step, the tool extracts all of the accumulated bitcode.
 
 ** Bitcode Generation Options
 
-The ~bitcode~ command has a number of options that may be useful in various contexts.
+The ~generate-bitcode~ command has a number of options that may be useful in various contexts.
 
 - ~--dry-run~: Replays the build without taking action
 - ~--clang~: Specify the full name (or path if desired) of a clang binary to use
-- ~--llvm-tool-suffix~: Specify a suffix to be appended to all LLVM command line tool names (e.g., ~llvm-link~); this is useful if LLVM commands are versioned on your system
+
+** Bitcode Extraction Options
+
+The ~extract-bitcode~ command also provides options:
+
+- ~--llvm-link-path~: Specify a path to the ~llvm-link~ binary; this is useful if LLVM commands are versioned on your system
 
 * Design
 
