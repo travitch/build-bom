@@ -32,6 +32,8 @@ In the first step, the tool acts as a wrapper around the real build system.  It 
 
 In the next step, the tool extracts all of the accumulated bitcode.
 
+*Note:* Currently *only* build system commands are supported (~make~, ~ninja~, etc.) and *not* direct compilation commands like ~clang~ or ~gcc~.
+
 ** Bitcode Generation Options
 
 The ~generate-bitcode~ command has a number of options that may be useful in various contexts.
