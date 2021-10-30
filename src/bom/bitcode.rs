@@ -133,6 +133,7 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
     let summary = event_consumer.join().unwrap();
     println!("Bitcode Generation Summary");
     println!(" {} build steps skipped due to having a pipe as an input or output", summary.num_pipe_io);
+    println!(" {} build steps skipped due to using a response file (@file)", summary.num_responsefile);
     println!(" {} unresolved outputs with multiple inputs", summary.unresolved_implicit_outputs);
     println!(" {} original build commands failed, causing us to skip bitcode generation", summary.build_failures_skipping_bitcode);
     println!(" {} inputs skipped due to being only assembled (-S)", summary.skipping_assemble_only);
@@ -153,6 +154,7 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
 #[derive(Debug)]
 pub enum Event {
     PipeInputOrOutput(RunCommand),
+    ResponseFile(RunCommand),
     MultipleInputsWithImplicitOutput(OsString,Vec<OsString>),
     BuildFailureSkippedBitcode(RunCommand, i32),
     BuildFailureUnknownEffect(RunCommand, i32),
@@ -394,6 +396,7 @@ pub const ELF_SECTION_NAME : &str = ".llvm_bitcode";
 
 struct SummaryStats {
     num_pipe_io : usize,
+    num_responsefile : usize,
     unresolved_implicit_outputs : usize,
     build_failures_skipping_bitcode : usize,
     build_failures_unknown_effect : usize,
@@ -404,6 +407,7 @@ struct SummaryStats {
 
 fn collect_events(stream_errors : bool, chan : mpsc::Receiver<Option<Event>>) -> SummaryStats {
     let mut summary = SummaryStats { num_pipe_io : 0,
+                                     num_responsefile : 0,
                                      unresolved_implicit_outputs : 0,
                                      build_failures_skipping_bitcode : 0,
                                      build_failures_unknown_effect : 0,
@@ -424,6 +428,12 @@ fn collect_events(stream_errors : bool, chan : mpsc::Receiver<Option<Event>>) ->
                         summary.num_pipe_io += 1;
                         if stream_errors {
                             println!("Pipe I/O in command '{:?} {:?}'", cmd.bin, cmd.args);
+                        }
+                    }
+                    Event::ResponseFile(cmd) => {
+                        summary.num_responsefile += 1;
+                        if stream_errors {
+                            println!("Response file in command '{:?} {:?}'", cmd.bin, cmd.args);
                         }
                     }
                     Event::MultipleInputsWithImplicitOutput(cmd, args) => {
@@ -587,6 +597,7 @@ fn post_process_actions(rc : RunCommand,
     let cmd_path = Path::new(&rc.bin);
     let mut has_compile_only_flag = false;
     let mut has_pipe_io = false;
+    let mut has_responsefile = false;
     let mut is_assemble_only = false;
     for arg in &rc.args {
         has_compile_only_flag = has_compile_only_flag || arg == "-c";
@@ -603,6 +614,7 @@ fn post_process_actions(rc : RunCommand,
         // For now, ignore them.  This could be guarded behind an
         // option.
         is_assemble_only = is_assemble_only || arg == "-S";
+        has_responsefile = has_responsefile || arg.to_str().unwrap().starts_with("@");
     }
     let should_make_bc = match cmd_path.file_name() {
         None => { false }
@@ -629,6 +641,9 @@ fn post_process_actions(rc : RunCommand,
             // Ignore send failures... that really shouldn't happen and
             // we don't want to kill the tracer thread.
             let _res = chan.send(Some(Event::PipeInputOrOutput(rc.clone())));
+        }
+        if has_responsefile {
+            let _res = chan.send(Some(Event::ResponseFile(rc.clone())));
         }
 
         if is_assemble_only {
