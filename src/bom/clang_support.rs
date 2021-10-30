@@ -7,6 +7,8 @@ static COMPILE_COMMANDS: &'static [&str] =
       r"c\+\+",
       r"clang",
       r"clang\+\+",
+      r"clang-\d+(\.\d+)",
+      r"clang\+\+-\d+(\.\d+)",
       r"gcc-\d+(\.\d+)",
       r"g\+\+-\d+(\.\d+)"
     ];
