@@ -139,6 +139,8 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
     println!(" {} inputs skipped due to being only assembled (-S)", summary.skipping_assemble_only);
     println!(" {} bitcode compilation errors", summary.bitcode_compile_errors);
     println!(" {} errors attaching bitcode to object files", summary.bitcode_attach_errors);
+    println!(" {} attempts at generating bitcode", summary.bitcode_generation_attempts);
+    println!(" {} successful bitcode captures", summary.bitcode_captures);
 
     let tracee = ptracer1.wait()?;
     match tracee {
@@ -160,7 +162,9 @@ pub enum Event {
     BuildFailureUnknownEffect(RunCommand, i32),
     SkippingAssembleOnlyCommand(RunCommand),
     BitcodeCompileError(PathBuf, Vec<OsString>,Vec<u8>,Vec<u8>,Option<i32>),
-    BitcodeAttachError(PathBuf, Vec<OsString>,Vec<u8>,Vec<u8>,Option<i32>)
+    BitcodeAttachError(PathBuf, Vec<OsString>,Vec<u8>,Vec<u8>,Option<i32>),
+    BitcodeGenerationAttempts,
+    BitcodeCaptured
 }
 
 fn build_bitcode_compile_only(chan : &mut mpsc::Sender<Option<Event>>,
@@ -233,6 +237,8 @@ fn build_bitcode_compile_only(chan : &mut mpsc::Sender<Option<Event>>,
             }
         }
     }
+
+    let _res = chan.send(Some(Event::BitcodeGenerationAttempts));
 
     let child = process::Command::new(&bc_command).
         args(&modified_args).
@@ -384,6 +390,8 @@ fn attach_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
                                                     out.stderr,
                                                     out.status.code());
                 let _res = chan.send(Some(err))?;
+            } else {
+                    let _res = chan.send(Some(Event::BitcodeCaptured));
             }
 
             Ok(())
@@ -402,7 +410,9 @@ struct SummaryStats {
     build_failures_unknown_effect : usize,
     skipping_assemble_only : usize,
     bitcode_compile_errors : usize,
-    bitcode_attach_errors : usize
+    bitcode_attach_errors : usize,
+    bitcode_generation_attempts : usize,
+    bitcode_captures : usize
 }
 
 fn collect_events(stream_errors : bool, chan : mpsc::Receiver<Option<Event>>) -> SummaryStats {
@@ -413,7 +423,9 @@ fn collect_events(stream_errors : bool, chan : mpsc::Receiver<Option<Event>>) ->
                                      build_failures_unknown_effect : 0,
                                      skipping_assemble_only : 0,
                                      bitcode_compile_errors : 0,
-                                     bitcode_attach_errors : 0
+                                     bitcode_attach_errors : 0,
+                                     bitcode_generation_attempts : 0,
+                                     bitcode_captures : 0
     };
     loop {
         match chan.recv() {
@@ -475,6 +487,12 @@ fn collect_events(stream_errors : bool, chan : mpsc::Receiver<Option<Event>>) ->
                             println!("  stdout: {}", String::from_utf8_lossy(&stdout).into_owned());
                             println!("  stderr: {}", String::from_utf8_lossy(&stderr).into_owned());
                         }
+                    }
+                    Event::BitcodeGenerationAttempts => {
+                        summary.bitcode_generation_attempts += 1;
+                    }
+                    Event::BitcodeCaptured => {
+                        summary.bitcode_captures += 1;
                     }
                 }
             }
