@@ -617,6 +617,7 @@ fn post_process_actions(rc : RunCommand,
     let mut has_pipe_io = false;
     let mut has_responsefile = false;
     let mut is_assemble_only = false;
+    let mut is_pre_proc_only = false;
     for arg in &rc.args {
         has_compile_only_flag = has_compile_only_flag || arg == "-c";
         // We want to recognize cases where the compilation
@@ -632,12 +633,15 @@ fn post_process_actions(rc : RunCommand,
         // For now, ignore them.  This could be guarded behind an
         // option.
         is_assemble_only = is_assemble_only || arg == "-S";
+        is_pre_proc_only = is_pre_proc_only || arg == "-E";
         has_responsefile = has_responsefile || arg.to_str().unwrap().starts_with("@");
     }
     let should_make_bc = match cmd_path.file_name() {
         None => { false }
         Some(cmd_file_name) => {
-            clang_support::is_compile_command_name(cmd_file_name) && has_compile_only_flag && !has_pipe_io && !is_assemble_only
+            has_compile_only_flag &&
+                !has_pipe_io && !is_assemble_only && !is_pre_proc_only &&
+                clang_support::is_compile_command_name(cmd_file_name)
         }
     };
 
@@ -655,17 +659,23 @@ fn post_process_actions(rc : RunCommand,
             Ok(_) => {}
         }
     } else {
-        if has_pipe_io {
-            // Ignore send failures... that really shouldn't happen and
-            // we don't want to kill the tracer thread.
-            let _res = chan.send(Some(Event::PipeInputOrOutput(rc.clone())));
-        }
-        if has_responsefile {
-            let _res = chan.send(Some(Event::ResponseFile(rc.clone())));
-        }
+        // Bump a summary stat indicating a reason why this compile
+        // could not attempt to generate bitcode.  Ignore
+        // pre-processor-only invocations, since they don't generate
+        // object code anyhow.
+        if !is_pre_proc_only {
+            if has_pipe_io {
+                // Ignore send failures... that really shouldn't happen and
+                // we don't want to kill the tracer thread.
+                let _res = chan.send(Some(Event::PipeInputOrOutput(rc.clone())));
+            }
+            if has_responsefile {
+                let _res = chan.send(Some(Event::ResponseFile(rc.clone())));
+            }
 
-        if is_assemble_only {
-            let _res = chan.send(Some(Event::SkippingAssembleOnlyCommand(rc)));
+            if is_assemble_only {
+                let _res = chan.send(Some(Event::SkippingAssembleOnlyCommand(rc)));
+            }
         }
     }
 }
