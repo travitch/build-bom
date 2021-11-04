@@ -390,7 +390,7 @@ fn obj_already_has_bitcode(cwd : &Path, obj_target : &OsString) -> bool {
                     // the section exists (it was output by the above)
                     true
                 } else {
-                    if str::from_utf8(&sts.stderr)
+                    if std::str::from_utf8(&sts.stderr)
                         .expect("stderr as string")
                         .contains(&format!("objdump: section '{}' mentioned in a -j option, but not found in any input file",
                                            ELF_SECTION_NAME).to_string()) {
