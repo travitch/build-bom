@@ -238,26 +238,28 @@ fn build_bitcode_compile_only(chan : &mut mpsc::Sender<Option<Event>>,
         }
     }
 
-    let _res = chan.send(Some(Event::BitcodeGenerationAttempts));
+    if !obj_already_has_bitcode(cwd, &resolved_object_target) {
+        let _res = chan.send(Some(Event::BitcodeGenerationAttempts));
 
-    let child = process::Command::new(&bc_command).
-        args(&modified_args).
-        current_dir(cwd).
-        stdout(process::Stdio::piped()).
-        stderr(process::Stdio::piped()).
-        spawn()?;
-    let out = child.wait_with_output()?;
-    if out.status.success() {
-        attach_bitcode(chan, cwd, &resolved_object_target, &resolved_bitcode_target)?;
-    } else {
-        let err = Event::BitcodeCompileError(Path::new(bc_command).to_path_buf(),
-                                             Vec::from(modified_args.clone()),
-                                             out.stdout,
-                                             out.stderr,
-                                             out.status.code());
-        let _res = chan.send(Some(err))?;
-        return Err(anyhow::Error::new(BitcodeError::ErrorGeneratingBitcode(Path::new(bc_command).to_path_buf(),
-                                                             Vec::from(modified_args))));
+        let child = process::Command::new(&bc_command).
+            args(&modified_args).
+            current_dir(cwd).
+            stdout(process::Stdio::piped()).
+            stderr(process::Stdio::piped()).
+            spawn()?;
+        let out = child.wait_with_output()?;
+        if out.status.success() {
+            attach_bitcode(chan, cwd, &resolved_object_target, &resolved_bitcode_target)?;
+        } else {
+            let err = Event::BitcodeCompileError(Path::new(bc_command).to_path_buf(),
+                                                 Vec::from(modified_args.clone()),
+                                                 out.stdout,
+                                                 out.stderr,
+                                                 out.status.code());
+            let _res = chan.send(Some(err))?;
+            return Err(anyhow::Error::new(BitcodeError::ErrorGeneratingBitcode(Path::new(bc_command).to_path_buf(),
+                                                                               Vec::from(modified_args))));
+        }
     }
 
     Ok(())
@@ -328,6 +330,81 @@ pub enum BitcodeError {
     #[error("Multiple input files found for command: {0:?}")]
     MultipleInputFiles(Vec<String>)
 }
+
+/// Returns true if the specified object file target already has an
+/// LLVM bitcode section attached to it.
+///
+/// This can typically occur when using a wrapper tool such as ccache.
+///
+/// Detailed explanation:
+/// ---------------------
+//
+/// The ccache tool provides a "clang" target in the PATH, which is
+/// actually a symlink to the ccache executable: the ccache executable
+/// will issue a pre-proc only (-E) actual clang operation and compare
+/// the results to the cached version to determine whether to issue
+/// the actual requested clang operation.
+///
+/// * If the ccache tool runs the actual clang operation, then
+/// build-bom will see that operation complete first and perform the
+/// requested bitcode attachment.  Then the ccache invocation
+/// completes but build-bom also identified it as a clang operation,
+/// so it will re-attempt to attach the bitcode.  This will normally
+/// fail the `objcopy` with a `bad value` error which is an indication
+/// that the named value already exists.
+///
+/// * If the ccache tool found that the cached object file should be
+/// used, build-bom will then try to generate and attach the bitcode
+/// again, resulting in the same `bad value` error described above.
+///
+/// One solution to this would be to explicitly ignore "bad value"
+/// errors on the `objcopy` phase with the assumption that this is the
+/// only situation where that will occur.  A second solution would be
+/// to check for symlinks to the ccache executable; this is not
+/// desireable because it will limit build-bom's support to only known
+/// and standard tools. The third solution (implemented here) is to
+/// check if an ELF_SECTION_NAME section already exists in the object
+/// file.  The advantage of this latter solution is that it will avoid
+/// re-generating the bitcode file for both cases described above (and
+/// also avoiding the assumption that a duplicate section name is the
+/// only cause of the "bad value" error report from `objcopy`).
+///
+/// There is a slight risk (to ALL the approaches described above)
+/// that there exists a section whose name matches the
+/// ELF_SECTION_NAME, but whose contents are not the bitcode file.
+/// That is a much more complex (and unlikely) scenario that is not
+/// addressed here.
+fn obj_already_has_bitcode(cwd : &Path, obj_target : &OsString) -> bool {
+    match process::Command::new("objdump")
+        .args(&["-h", "-j", ELF_SECTION_NAME,
+                &obj_target.to_str().unwrap()])
+        .current_dir(cwd)
+        .output() {
+            Err(err) => {
+                println!("Error checking {:?} section existence: {:?}", ELF_SECTION_NAME, err);
+                // TODO something else here?  another event?
+                false
+            }
+            Ok(sts) => {
+                if sts.status.success() {
+                    // the section exists (it was output by the above)
+                    true
+                } else {
+                    if str::from_utf8(&sts.stderr)
+                        .expect("stderr as string")
+                        .contains(&format!("objdump: section '{}' mentioned in a -j option, but not found in any input file",
+                                           ELF_SECTION_NAME).to_string()) {
+                            false
+                        } else {
+                            println!("Unexpected error checking {:?} section existence: {:?}", ELF_SECTION_NAME, sts.stderr);
+                            // TODO something else here?  another event?
+                            false
+                        }
+                }
+            }
+        }
+}
+
 
 /// Attach the bitcode file at the given path to its associated object file target
 ///
