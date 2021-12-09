@@ -142,9 +142,10 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
     println!(" {} attempts at generating bitcode", summary.bitcode_generation_attempts);
     println!(" {} successful bitcode captures", summary.bitcode_captures);
 
-    let tracee = ptracer1.wait()?;
+    let (mut last_ptracer, exitcode) = ptracer1;
+    let tracee = last_ptracer.wait()?;
     match tracee {
-        None => { Ok(0) }
+        None => { Ok(exitcode) }
         Some(t) =>
             match t.stop {
                 pete::Stop::Exiting { exit_code: ec } => { Ok(ec) }
@@ -765,6 +766,7 @@ fn generate_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
 ) -> anyhow::Result<pete::Ptracer> {
     let mut process_state = HashMap::new();
     let syscalls = load_syscalls();
+    let mut last_exitcode = 0;
 
     // We want to observe execve syscalls. After a process (successfully) execs
     // a command we care about, we want to record that PID (along with the
@@ -797,6 +799,7 @@ fn generate_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
                 }
             }
             pete::Stop::Exiting { exit_code }=> {
+                last_exitcode = exit_code;
                 handle_process_exit(chan, tracee.pid, exit_code, &mut process_state, clang_path, bcout_path);
             }
             _ => {}
@@ -805,7 +808,7 @@ fn generate_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
         ptracer.restart(tracee, pete::Restart::Syscall)?;
     }
 
-    Ok(ptracer)
+    Ok((ptracer, last_exitcode))
 }
 
 fn decode_raw_string(rs : &RawString) -> anyhow::Result<OsString> {
