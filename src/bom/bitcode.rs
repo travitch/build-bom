@@ -141,6 +141,8 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
     println!(" {} errors attaching bitcode to object files", summary.bitcode_attach_errors);
     println!(" {} attempts at generating bitcode", summary.bitcode_generation_attempts);
     println!(" {} successful bitcode captures", summary.bitcode_captures);
+    println!(" last bitcode capture: {:?}", summary.last_capture_file.map_or("<none>".into(),
+                                                                             |f| f.into_os_string()));
 
     let (mut last_ptracer, exitcode) = ptracer1;
     let tracee = last_ptracer.wait()?;
@@ -165,7 +167,7 @@ pub enum Event {
     BitcodeCompileError(PathBuf, Vec<OsString>,Vec<u8>,Vec<u8>,Option<i32>),
     BitcodeAttachError(PathBuf, Vec<OsString>,Vec<u8>,Vec<u8>,Option<i32>),
     BitcodeGenerationAttempts,
-    BitcodeCaptured
+    BitcodeCaptured(PathBuf)
 }
 
 fn build_bitcode_compile_only(chan : &mut mpsc::Sender<Option<Event>>,
@@ -469,7 +471,7 @@ fn attach_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
                                                     out.status.code());
                 let _res = chan.send(Some(err))?;
             } else {
-                    let _res = chan.send(Some(Event::BitcodeCaptured));
+                    let _res = chan.send(Some(Event::BitcodeCaptured(bc_target_path.to_path_buf())));
             }
 
             Ok(())
@@ -490,7 +492,8 @@ struct SummaryStats {
     bitcode_compile_errors : usize,
     bitcode_attach_errors : usize,
     bitcode_generation_attempts : usize,
-    bitcode_captures : usize
+    bitcode_captures : usize,
+    last_capture_file : Option<PathBuf>
 }
 
 fn collect_events(stream_errors : bool, chan : mpsc::Receiver<Option<Event>>) -> SummaryStats {
@@ -503,7 +506,8 @@ fn collect_events(stream_errors : bool, chan : mpsc::Receiver<Option<Event>>) ->
                                      bitcode_compile_errors : 0,
                                      bitcode_attach_errors : 0,
                                      bitcode_generation_attempts : 0,
-                                     bitcode_captures : 0
+                                     bitcode_captures : 0,
+                                     last_capture_file : None
     };
     loop {
         match chan.recv() {
@@ -569,8 +573,9 @@ fn collect_events(stream_errors : bool, chan : mpsc::Receiver<Option<Event>>) ->
                     Event::BitcodeGenerationAttempts => {
                         summary.bitcode_generation_attempts += 1;
                     }
-                    Event::BitcodeCaptured => {
+                    Event::BitcodeCaptured(into) => {
                         summary.bitcode_captures += 1;
+                        summary.last_capture_file = Some(into);
                     }
                 }
             }
