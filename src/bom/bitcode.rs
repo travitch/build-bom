@@ -763,7 +763,7 @@ fn generate_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
                     mut ptracer : pete::Ptracer,
                     clang_path : &OsStr,
                     bcout_path : std::option::Option<&PathBuf>
-) -> anyhow::Result<pete::Ptracer> {
+) -> anyhow::Result<(pete::Ptracer, i32)> {
     let mut process_state = HashMap::new();
     let syscalls = load_syscalls();
     let mut last_exitcode = 0;
