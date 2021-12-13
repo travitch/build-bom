@@ -389,20 +389,21 @@ fn obj_already_has_bitcode(cwd : &Path, obj_target : &OsString) -> bool {
                 false
             }
             Ok(sts) => {
-                if sts.status.success() {
-                    // the section exists (it was output by the above)
-                    true
-                } else {
-                    if std::str::from_utf8(&sts.stderr)
-                        .expect("stderr as string")
-                        .contains(&format!("objdump: section '{}' mentioned in a -j option, but not found in any input file",
-                                           ELF_SECTION_NAME).to_string()) {
-                            false
-                        } else {
-                            println!("Unexpected error checking {:?} section existence: {:?}", ELF_SECTION_NAME, sts.stderr);
-                            // TODO something else here?  another event?
-                            false
-                        }
+                // n.b. ignore success or failure of the command
+                // because different objdump builds have different
+                // results: the gnu objdump tends to fail with a
+                // non-zero exit code, but the llvm objdump simply
+                // generates a warning and exits with success).
+                match std::str::from_utf8(&sts.stderr) {
+                    Ok(estr) => {
+                        estr.lines()
+                            .filter(|l| (l.contains(&format!("section '{}' mentioned",
+                                                             ELF_SECTION_NAME))
+                                         && l.contains("but not found in any input file")))
+                            .collect::<Vec<&str>>()
+                            .is_empty()
+                    }
+                    Err(_) => { false }
                 }
             }
         }
