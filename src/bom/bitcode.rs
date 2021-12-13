@@ -322,8 +322,8 @@ fn input_sources<'a>(args : &'a[OsString]) -> Result<&'a OsString,BitcodeError> 
 
 #[derive(thiserror::Error,Debug)]
 pub enum BitcodeError {
-    #[error("Error attaching bitcode file '{2:?}' to '{1:?}' in {0:?} ({3:?})")]
-    ErrorAttachingBitcode(PathBuf, OsString, OsString, std::io::Error),
+    #[error("Error attaching bitcode file '{2:?}' to '{1:?}' in {0:?} ({3:?} / {4:?})")]
+    ErrorAttachingBitcode(PathBuf, OsString, OsString, std::io::Error, String),
     #[error("Missing output file in command {0:?} {1:?}")]
     MissingOutputFile(PathBuf, Vec<OsString>),
     #[error("Error generating bitcode with command {0:?} {1:?})")]
@@ -459,7 +459,43 @@ fn attach_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
 
     match process::Command::new("objcopy").args(&objcopy_args).stdout(process::Stdio::piped()).stderr(process::Stdio::piped()).current_dir(cwd).spawn() {
         Err(msg) => {
-            return Err(anyhow::Error::new(BitcodeError::ErrorAttachingBitcode(cwd.to_path_buf(), orig_target.clone(), bc_target.clone(), msg)));
+            match process::Command::new("objcopy")
+                .arg("--version")
+                .stdout(process::Stdio::piped())
+                .stderr(process::Stdio::piped())
+                .spawn() {
+                    Ok(child) => {
+                        let ver = child.wait_with_output()?;
+                        if !ver.status.success() {
+                            return Err(anyhow::Error::new(
+                                BitcodeError::ErrorAttachingBitcode(
+                                    cwd.to_path_buf(),
+                                    orig_target.clone(),
+                                    bc_target.clone(),
+                                    msg,
+                                    format!("objcopy failed to return version\n{:?}\nErr: {:?}",
+                                            ver.stdout, ver.stderr)
+                                )));
+                        }
+                        return Err(anyhow::Error::new(
+                            BitcodeError::ErrorAttachingBitcode(
+                                cwd.to_path_buf(),
+                                orig_target.clone(),
+                                bc_target.clone(),
+                                msg,
+                                format!("{:?}\nErr: {:?}", ver.stdout, ver.stderr)
+                            )));
+                    }
+                    Err(vermsg) => {
+                        return Err(anyhow::Error::new(
+                            BitcodeError::ErrorAttachingBitcode(
+                                cwd.to_path_buf(),
+                                orig_target.clone(),
+                                bc_target.clone(),
+                                msg,
+                                format!("objcopy --version run failed: {}", vermsg))));
+                    }
+                }
         }
         Ok(child) => {
             let out = child.wait_with_output()?;
