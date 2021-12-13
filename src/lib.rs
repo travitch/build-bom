@@ -11,6 +11,6 @@ pub fn run_bom(opt : Options) -> anyhow::Result<i32> {
         Subcommand::Trace(trace_opts) => { trace_entrypoint(&trace_opts)?; Ok(0) }
         Subcommand::Normalize(normalize_opts) => { normalize_entrypoint(&normalize_opts)?; Ok(0) }
         Subcommand::GenerateBitcode(bitcode_opts) => { bitcode_entrypoint(&bitcode_opts) }
-        Subcommand::ExtractBitcode(extract_opts) => { extract_bitcode_entrypoint(&extract_opts)?; Ok(0) }
+        Subcommand::ExtractBitcode(extract_opts) => { extract_bitcode_entrypoint(&extract_opts) }
     }
 }
