@@ -11,7 +11,7 @@ pub enum ExtractError {
     ErrorRunningCommand(String,Vec<OsString>,std::io::Error)
 }
 
-pub fn extract_bitcode_entrypoint(extract_options : &ExtractOptions) -> anyhow::Result<()> {
+pub fn extract_bitcode_entrypoint(extract_options : &ExtractOptions) -> anyhow::Result<i32> {
     let tmp_dir = tempfile::TempDir::new()?;
     let mut tar_path = PathBuf::new();
     tar_path.push(tmp_dir.path());
@@ -28,7 +28,19 @@ pub fn extract_bitcode_entrypoint(extract_options : &ExtractOptions) -> anyhow::
             return Err(anyhow::Error::new(ExtractError::ErrorRunningCommand(String::from("objcopy"), objcopy_args, msg)));
         }
         Ok(mut child) => {
-            let _rc = child.wait();
+            match child.wait() {
+                Err(msg) => {
+                    return Err(anyhow::Error::new(ExtractError::ErrorRunningCommand(String::from("objcopy"), Vec::new() /*objcopy_args*/, msg)));
+                }
+                Ok(sts) => {
+                    if !sts.success() {
+                        match sts.code() {
+                            Some(rc) => { return Ok(rc) }
+                            None => { return Ok(-1) }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -75,5 +87,5 @@ pub fn extract_bitcode_entrypoint(extract_options : &ExtractOptions) -> anyhow::
         }
     }
 
-    Ok(())
+    Ok(0)
 }
