@@ -460,43 +460,8 @@ fn attach_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
 
     match process::Command::new("objcopy").args(&objcopy_args).stdout(process::Stdio::piped()).stderr(process::Stdio::piped()).current_dir(cwd).spawn() {
         Err(msg) => {
-            match process::Command::new("objcopy")
-                .arg("--version")
-                .stdout(process::Stdio::piped())
-                .stderr(process::Stdio::piped())
-                .spawn() {
-                    Ok(child) => {
-                        let ver = child.wait_with_output()?;
-                        if !ver.status.success() {
-                            return Err(anyhow::Error::new(
-                                BitcodeError::ErrorAttachingBitcode(
-                                    cwd.to_path_buf(),
-                                    orig_target.clone(),
-                                    bc_target.clone(),
-                                    msg,
-                                    format!("objcopy failed to return version\n{:?}\nErr: {:?}",
-                                            ver.stdout, ver.stderr)
-                                )));
-                        }
-                        return Err(anyhow::Error::new(
-                            BitcodeError::ErrorAttachingBitcode(
-                                cwd.to_path_buf(),
-                                orig_target.clone(),
-                                bc_target.clone(),
-                                msg,
-                                format!("{:?}\nErr: {:?}", ver.stdout, ver.stderr)
-                            )));
-                    }
-                    Err(vermsg) => {
-                        return Err(anyhow::Error::new(
-                            BitcodeError::ErrorAttachingBitcode(
-                                cwd.to_path_buf(),
-                                orig_target.clone(),
-                                bc_target.clone(),
-                                msg,
-                                format!("objcopy --version run failed: {}", vermsg))));
-                    }
-                }
+            let objcopy_ver = get_objcopy_version_info();
+            return Err(anyhow::Error::new(BitcodeError::ErrorAttachingBitcode(cwd.to_path_buf(), orig_target.clone(), bc_target.clone(), msg, objcopy_ver)));
         }
         Ok(child) => {
             let out = child.wait_with_output()?;
@@ -517,6 +482,29 @@ fn attach_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
 }
 
 pub const ELF_SECTION_NAME : &str = ".llvm_bitcode";
+
+
+fn get_objcopy_version_info() -> String {
+    match process::Command::new("objcopy")
+        .arg("--version")
+        .stdout(process::Stdio::piped())
+        .stderr(process::Stdio::piped())
+        .spawn() {
+            Ok(child) => {
+                let ver = child.wait_with_output()
+                    .expect("Unable to get objcopy --version output");
+                if !ver.status.success() {
+                    format!("objcopy failed to return version\n{:?}\nErr: {:?}",
+                            ver.stdout, ver.stderr)
+                } else {
+                    format!("{:?}\nErr: {:?}", ver.stdout, ver.stderr)
+                }
+            }
+            Err(vermsg) => {
+                format!("objcopy --version run failed: {}", vermsg)
+            }
+        }
+}
 
 
 struct SummaryStats {
