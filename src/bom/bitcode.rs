@@ -131,18 +131,7 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
     // Send a token to shut down the event collector thread
     sender.send(None)?;
     let summary = event_consumer.join().unwrap();
-    println!("Bitcode Generation Summary");
-    println!(" {} build steps skipped due to having a pipe as an input or output", summary.num_pipe_io);
-    println!(" {} build steps skipped due to using a response file (@file)", summary.num_responsefile);
-    println!(" {} unresolved outputs with multiple inputs", summary.unresolved_implicit_outputs);
-    println!(" {} original build commands failed, causing us to skip bitcode generation", summary.build_failures_skipping_bitcode);
-    println!(" {} inputs skipped due to being only assembled (-S)", summary.skipping_assemble_only);
-    println!(" {} bitcode compilation errors", summary.bitcode_compile_errors);
-    println!(" {} errors attaching bitcode to object files", summary.bitcode_attach_errors);
-    println!(" {} attempts at generating bitcode", summary.bitcode_generation_attempts);
-    println!(" {} successful bitcode captures", summary.bitcode_captures);
-    println!(" last bitcode capture: {:?}", summary.last_capture_file.map_or("<none>".into(),
-                                                                             |f| f.into_os_string()));
+    print_summary(summary);
 
     let (mut last_ptracer, exitcode) = ptracer1;
     let tracee = last_ptracer.wait()?;
@@ -519,6 +508,21 @@ struct SummaryStats {
     bitcode_generation_attempts : usize,
     bitcode_captures : usize,
     last_capture_file : Option<PathBuf>
+}
+
+fn print_summary(summary : SummaryStats) {
+    println!("Bitcode Generation Summary");
+    println!(" {} build steps skipped due to having a pipe as an input or output", summary.num_pipe_io);
+    println!(" {} build steps skipped due to using a response file (@file)", summary.num_responsefile);
+    println!(" {} unresolved outputs with multiple inputs", summary.unresolved_implicit_outputs);
+    println!(" {} original build commands failed, causing us to skip bitcode generation", summary.build_failures_skipping_bitcode);
+    println!(" {} inputs skipped due to being only assembled (-S)", summary.skipping_assemble_only);
+    println!(" {} bitcode compilation errors", summary.bitcode_compile_errors);
+    println!(" {} errors attaching bitcode to object files", summary.bitcode_attach_errors);
+    println!(" {} attempts at generating bitcode", summary.bitcode_generation_attempts);
+    println!(" {} successful bitcode captures", summary.bitcode_captures);
+    println!(" last bitcode capture: {:?}", summary.last_capture_file.map_or("<none>".into(),
+                                                                             |f| f.into_os_string()));
 }
 
 fn collect_events(stream_errors : bool, chan : mpsc::Receiver<Option<Event>>) -> SummaryStats {
