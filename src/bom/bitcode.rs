@@ -126,7 +126,7 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
     let event_consumer = thread::spawn(move || { collect_events(stream_output, receiver) });
     let clang_path = bitcode_options.clang_path.as_ref().map(|s| OsString::from(s.as_path().as_os_str()))
                                                         .unwrap_or(OsString::from("clang"));
-    let mut ptracer1 = generate_bitcode(&mut sender, ptracer, clang_path.as_ref(), bitcode_options.bcout_path.as_ref())?;
+    let ptracer1 = generate_bitcode(&mut sender, ptracer, clang_path.as_ref(), bitcode_options.bcout_path.as_ref())?;
 
     // Send a token to shut down the event collector thread
     sender.send(None)?;
