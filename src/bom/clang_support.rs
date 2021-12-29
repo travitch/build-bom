@@ -126,16 +126,26 @@ static CLANG_ARGUMENT_BLACKLIST : &'static [&str] =
       ];
 
 lazy_static::lazy_static! {
+    // regex of original build arguments to completely remove when
+    // generating bitcode via clang
     static ref CLANG_ARGUMENT_BLACKLIST_RE : regex::RegexSet = regex::RegexSet::new(CLANG_ARGUMENT_BLACKLIST).unwrap();
+
+    // regex of original build arguments that may be removed when
+    // generating bitcode via clang unless --flags-unchanged is
+    // specified on the command line.
+    static ref CLANG_PRESERVE_FLAGS_RE : regex::Regex = regex::Regex::new(r"^-O\d*$").unwrap();
 }
 
 /// Returns true if the argument is not accepted by clang and should be ignored
 /// when constructing clang invocations.
-pub fn is_blacklisted_clang_argument(a : &OsStr) -> bool {
+pub fn is_blacklisted_clang_argument(a : &OsStr,
+                                     keep_original_flags : &bool) -> bool {
     match a.to_str() {
         None => { false }
         Some(str_arg) => {
-            CLANG_ARGUMENT_BLACKLIST_RE.is_match(str_arg)
+            CLANG_ARGUMENT_BLACKLIST_RE.is_match(str_arg) ||
+                (!*keep_original_flags &&
+                 CLANG_PRESERVE_FLAGS_RE.is_match(str_arg))
         }
     }
 }

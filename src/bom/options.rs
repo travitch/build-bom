@@ -39,7 +39,9 @@ pub struct BitcodeOptions {
     #[structopt(short="v", long="verbose", help="Generate verbose output")]
     pub verbose : bool,
     #[structopt(last = true, help="The build command to run")]
-    pub command : Vec<String>
+    pub command : Vec<String>,
+    #[structopt(short="f", long="flags-unchanged", help="Do not adjust flags (e.g. disable optimization) when generating bitcode")]
+    pub original_flags : bool
 }
 
 #[derive(Debug,StructOpt)]

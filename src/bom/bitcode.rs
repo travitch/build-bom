@@ -126,7 +126,7 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
     let event_consumer = thread::spawn(move || { collect_events(stream_output, receiver) });
     let clang_path = bitcode_options.clang_path.as_ref().map(|s| OsString::from(s.as_path().as_os_str()))
                                                         .unwrap_or(OsString::from("clang"));
-    let mut ptracer1 = generate_bitcode(&mut sender, ptracer, clang_path.as_ref(), bitcode_options.bcout_path.as_ref())?;
+    let mut ptracer1 = generate_bitcode(&mut sender, ptracer, clang_path.as_ref(), &bitcode_options.original_flags, bitcode_options.bcout_path.as_ref())?;
 
     // Send a token to shut down the event collector thread
     sender.send(None)?;
@@ -174,16 +174,21 @@ fn build_bitcode_compile_only(chan : &mut mpsc::Sender<Option<Event>>,
                               bc_command : &OsStr,
                               args : &[OsString],
                               cwd : &Path,
+                              original_flags : &bool,
                               bcdir : Option<&PathBuf>
 ) -> anyhow::Result<()> {
     let mut orig_target = None;
     let mut new_target = OsString::from("");
     let mut modified_args = Vec::new() as Vec<OsString>;
     modified_args.push(OsString::from("-emit-llvm"));
+    modified_args.push(OsString::from("-g")); // debug info for maximum LLVM embedded info
+    if !original_flags {
+        modified_args.push(OsString::from("-O0"));
+    };
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         // Skip any argument on the clang argument blacklist
-        if clang_support::is_blacklisted_clang_argument(arg) {
+        if clang_support::is_blacklisted_clang_argument(arg, original_flags) {
             continue;
         }
 
@@ -680,6 +685,7 @@ fn handle_process_exit(chan : &mut mpsc::Sender<Option<Event>>,
                        exit_code : i32,
                        process_state : &mut HashMap<i32, ProcessState>,
                        clang_path : &OsStr,
+                       original_flags : &bool,
                        bcout_path : Option<&PathBuf>
 ) {
     let ipid = pid.as_raw() as i32;
@@ -708,7 +714,7 @@ fn handle_process_exit(chan : &mut mpsc::Sender<Option<Event>>,
                 return;
             }
             // The process successfully exec'd - see if we want to do anything with it
-            post_process_actions(rc, chan, clang_path, bcout_path);
+            post_process_actions(rc, chan, clang_path, original_flags, bcout_path);
         }
     }
 }
@@ -718,6 +724,7 @@ fn handle_process_exit(chan : &mut mpsc::Sender<Option<Event>>,
 fn post_process_actions(rc : RunCommand,
                         chan : &mut mpsc::Sender<Option<Event>>,
                         clang_path : &OsStr,
+                        original_flags : &bool,
                         bcout_path : Option<&PathBuf>
 ) {
     let cmd_path = Path::new(&rc.bin);
@@ -762,8 +769,8 @@ fn post_process_actions(rc : RunCommand,
         // We drop the first argument because it is just the
         // original command name
         let (_, rest_args) = rc.args.split_at(1);
-        match build_bitcode_compile_only(chan, clang_path, rest_args, &rc.cwd, bcout_path) {
-            Err(err) => { println!("Error building bitcode: {:?}", err) }
+        match build_bitcode_compile_only(chan, clang_path, rest_args, &rc.cwd, original_flags, bcout_path) {
+            Err(err) => { println!("Error building {:?} bitcode: {:?}", bcout_path, err) }
             Ok(_) => {}
         }
     } else {
@@ -792,6 +799,7 @@ fn post_process_actions(rc : RunCommand,
 fn generate_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
                     mut ptracer : pete::Ptracer,
                     clang_path : &OsStr,
+                    original_flags : &bool,
                     bcout_path : std::option::Option<&PathBuf>
 ) -> anyhow::Result<(pete::Ptracer, i32)> {
     let mut process_state = HashMap::new();
@@ -830,7 +838,7 @@ fn generate_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
             }
             pete::Stop::Exiting { exit_code }=> {
                 last_exitcode = exit_code;
-                handle_process_exit(chan, tracee.pid, exit_code, &mut process_state, clang_path, bcout_path);
+                handle_process_exit(chan, tracee.pid, exit_code, &mut process_state, clang_path, original_flags, bcout_path);
             }
             _ => {}
         }
