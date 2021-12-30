@@ -159,41 +159,64 @@ pub enum Event {
     BitcodeCaptured(PathBuf)
 }
 
-fn build_bitcode_compile_only(chan : &mut mpsc::Sender<Option<Event>>,
-                              bc_command : &OsStr,
-                              args : &[OsString],
-                              cwd : &Path,
-                              bcdir : Option<&PathBuf>
-) -> anyhow::Result<()> {
+struct BitcodeArguments {
+    bitcode_arguments : Vec<OsString>,
+    resolved_bitcode_target : OsString,
+    resolved_object_target : OsString
+}
+
+fn make_bitcode_filename(target : &OsString, bc_dir : Option<&PathBuf>) -> PathBuf {
+    let mut target_path = match bc_dir {
+        None => PathBuf::from(&target),
+        Some(p) => {
+            let mut pp = PathBuf::from(&p);
+            pp.push(&PathBuf::from(&target).file_name().expect("target is not a file"));
+            pp
+        }
+    };
+    target_path.set_extension("bc");
+    target_path
+}
+
+/// Given original arguments (excluding argv[0]), construct the command line we
+/// will pass to clang to build bitcode
+///
+/// This handles removing flags that clang can't handle (or that we definitely
+/// do not want for bitcode generation), as well as transforming the output file
+/// path
+fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
+                           bc_command : &OsStr,
+                           orig_args : &[OsString],
+                           bc_dir : Option<&PathBuf>) -> anyhow::Result<BitcodeArguments> {
     let mut orig_target = None;
     let mut new_target = OsString::from("");
-    let mut modified_args = Vec::new() as Vec<OsString>;
+    let mut modified_args = Vec::new();
+
+    // We always need to add this key flag
     modified_args.push(OsString::from("-emit-llvm"));
-    let mut it = args.iter();
+
+    // Next, copy over all of the flags we want to keep
+    let mut it = orig_args.iter();
     while let Some(arg) = it.next() {
-        // Skip any argument on the clang argument blacklist
+        // Skip any arguments explicitly blacklisted
         if clang_support::is_blacklisted_clang_argument(arg) {
             continue;
         }
 
         modified_args.push(OsString::from(arg.to_owned()));
+
+        // If the argument specifies the output file, we need to munge the name
+        // of the output file (which is the next argument) to have an
+        // appropriate extension and to put it in the requested bitcode
+        // directory (if any)
         if arg == "-o" {
             match it.next() {
                 None => {
-                    return Err(anyhow::Error::new(BitcodeError::MissingOutputFile(Path::new(bc_command).to_path_buf(), Vec::from(args))));
+                    return Err(anyhow::Error::new(BitcodeError::MissingOutputFile(Path::new(bc_command).to_path_buf(), Vec::from(orig_args))));
                 }
                 Some(target) => {
                     orig_target = Some(PathBuf::from(&target).into_os_string());
-                    let mut target_path = match bcdir {
-                        None => PathBuf::from(&target),
-                        Some(p) => {
-                            let mut pp = PathBuf::from(&p);
-                            pp.push(&PathBuf::from(&target).file_name()
-                                    .expect("target is not a file"));
-                            pp
-                        }
-                    };
-                    target_path.set_extension("bc");
+                    let target_path = make_bitcode_filename(target, bc_dir);
                     new_target = OsString::from(target_path.clone());
                     modified_args.push(target_path.into_os_string());
                 }
@@ -213,7 +236,7 @@ fn build_bitcode_compile_only(chan : &mut mpsc::Sender<Option<Event>>,
             // There was no explicitly-specified object file.  If there was a
             // single input source file, the object file name will be that input
             // source with the extension replaced by .o.
-            match input_sources(args) {
+            match input_sources(orig_args) {
                 Ok(source_file) => {
                     let mut target_path = PathBuf::from(source_file);
                     target_path.set_extension("o");
@@ -223,34 +246,50 @@ fn build_bitcode_compile_only(chan : &mut mpsc::Sender<Option<Event>>,
                     resolved_bitcode_target = OsString::from(bc_path.clone());
                 }
                 Err(msg) => {
-                    let _res = chan.send(Some(Event::MultipleInputsWithImplicitOutput(bc_command.to_os_string(), args.to_vec())));
+                    let _res = chan.send(Some(Event::MultipleInputsWithImplicitOutput(bc_command.to_os_string(), orig_args.to_vec())));
                     return Err(anyhow::Error::new(msg));
                 }
             }
         }
     }
 
-    if !obj_already_has_bitcode(cwd, &resolved_object_target) {
+    let res = BitcodeArguments {
+        bitcode_arguments : modified_args,
+        resolved_bitcode_target : resolved_bitcode_target,
+        resolved_object_target : resolved_object_target
+    };
+    Ok(res)
+}
+
+fn build_bitcode_compile_only(chan : &mut mpsc::Sender<Option<Event>>,
+                              bc_command : &OsStr,
+                              args : &[OsString],
+                              cwd : &Path,
+                              bcdir : Option<&PathBuf>
+) -> anyhow::Result<()> {
+    let bc_args = build_bitcode_arguments(chan, bc_command, args, bcdir)?;
+
+    if !obj_already_has_bitcode(cwd, &bc_args.resolved_object_target) {
         let _res = chan.send(Some(Event::BitcodeGenerationAttempts));
 
         let child = process::Command::new(&bc_command).
-            args(&modified_args).
+            args(&bc_args.bitcode_arguments).
             current_dir(cwd).
             stdout(process::Stdio::piped()).
             stderr(process::Stdio::piped()).
             spawn()?;
         let out = child.wait_with_output()?;
         if out.status.success() {
-            attach_bitcode(chan, cwd, &resolved_object_target, &resolved_bitcode_target)?;
+            attach_bitcode(chan, cwd, &bc_args.resolved_object_target, &bc_args.resolved_bitcode_target)?;
         } else {
             let err = Event::BitcodeCompileError(Path::new(bc_command).to_path_buf(),
-                                                 Vec::from(modified_args.clone()),
+                                                 Vec::from(bc_args.bitcode_arguments.clone()),
                                                  out.stdout,
                                                  out.stderr,
                                                  out.status.code());
             let _res = chan.send(Some(err))?;
             return Err(anyhow::Error::new(BitcodeError::ErrorGeneratingBitcode(Path::new(bc_command).to_path_buf(),
-                                                                               Vec::from(modified_args))));
+                                                                               Vec::from(bc_args.bitcode_arguments))));
         }
     }
 
@@ -640,6 +679,10 @@ fn collect_events(stream_errors : bool, chan : mpsc::Receiver<Option<Event>>) ->
 }
 
 
+/// A command that was run by a process we are tracing
+///
+/// This is the saved version that we attempt to postprocess to see if we need
+/// to generate bitcode for it
 #[derive(Debug,Clone)]
 pub struct RunCommand {
     bin : OsString,
@@ -799,6 +842,19 @@ fn extract_compile_modifiers(rc : &RunCommand) -> CompileModifiers {
     mods
 }
 
+/// Returns true if we should make bitcode given this command
+fn should_make_bc(rc : &RunCommand, comp_mods : &CompileModifiers) -> bool {
+    let cmd_path = Path::new(&rc.bin);
+    match cmd_path.file_name() {
+        None => { false }
+        Some(cmd_file_name) => {
+            comp_mods.is_compile_only &&
+                !comp_mods.is_pipe_io && !comp_mods.is_assemble_only && !comp_mods.is_pre_proc_only &&
+                clang_support::is_compile_command_name(cmd_file_name)
+        }
+    }
+}
+
 /// Determine what actions should be taken on the successful execution
 /// completion of a build process action.
 fn post_process_actions(rc : RunCommand,
@@ -806,26 +862,15 @@ fn post_process_actions(rc : RunCommand,
                         clang_path : &OsStr,
                         bcout_path : Option<&PathBuf>
 ) {
-    let cmd_path = Path::new(&rc.bin);
     let comp_mods = extract_compile_modifiers(&rc);
-
-    let should_make_bc = match cmd_path.file_name() {
-        None => { false }
-        Some(cmd_file_name) => {
-            comp_mods.is_compile_only &&
-                !comp_mods.is_pipe_io && !comp_mods.is_assemble_only && !comp_mods.is_pre_proc_only &&
-                clang_support::is_compile_command_name(cmd_file_name)
-        }
-    };
-
-    if should_make_bc {
+    if should_make_bc(&rc, &comp_mods) {
         // If this is a command we can build bitcode for, do
         // it.  We wait until the exec'd process exits
         // because we need the original object file to exist
         // (so that we can attach the bitcode).
         //
         // We drop the first argument because it is just the
-        // original command name
+        // original command name (i.e., argv[0])
         let (_, rest_args) = rc.args.split_at(1);
         match build_bitcode_compile_only(chan, clang_path, rest_args, &rc.cwd, bcout_path) {
             Err(err) => { println!("Error building bitcode: {:?}", err) }
