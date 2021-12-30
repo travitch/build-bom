@@ -30,8 +30,6 @@ pub struct ExtractOptions {
 
 #[derive(Debug,StructOpt)]
 pub struct BitcodeOptions {
-    // #[structopt(help="A file containing traced build actions")]
-    // pub input : PathBuf,
     #[structopt(long="clang", help="Name of the clang binary to use to generate bitcode (default: `clang`)")]
     pub clang_path : Option<PathBuf>,
     #[structopt(short="b", long="bc-out", help="Directory to place LLVM bitcode (bc) output data.  The default is to place it next to the object file, but it must be accessible by a subsequent Extract operation and some build tools build in a temporary directory that is disposed of at the end of the build (e.g. CMake) ")]
