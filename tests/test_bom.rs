@@ -69,6 +69,8 @@ fn test_zlib() -> anyhow::Result<()> {
     let gen_opts = BitcodeOptions { clang_path: user_clang_cmd(),
                                     bcout_path: None,
                                     suppress_automatic_debug: false,
+                                    inject_arguments: Vec::new(),
+                                    remove_arguments: Vec::new(),
                                     verbose: false,
                                     command: cmd_opts };
     gen_bitcode(gen_opts)?;
