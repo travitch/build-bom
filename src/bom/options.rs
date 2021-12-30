@@ -36,6 +36,8 @@ pub struct BitcodeOptions {
     pub bcout_path : Option<PathBuf>,
     #[structopt(short="v", long="verbose", help="Generate verbose output")]
     pub verbose : bool,
+    #[structopt(long="suppress-automatic-debug", help="Prevent `build-bom` from automatically injecting flags to generate debug information in bitcode files")]
+    pub suppress_automatic_debug : bool,
     #[structopt(last = true, help="The build command to run")]
     pub command : Vec<String>
 }

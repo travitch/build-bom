@@ -79,7 +79,7 @@ use std::collections::HashMap;
 use std::path::{Path,PathBuf};
 use std::io::Read;
 use std::process;
-use std::ffi::{OsStr,OsString};
+use std::ffi::{OsString};
 use std::os::unix::ffi::OsStringExt;
 use std::process::Command;
 use std::sync::mpsc;
@@ -99,6 +99,16 @@ pub enum TracerError {
     NoTraceeOnExit,
     #[error("Unexpected exit state on top-level subprocess exit")]
     UnexpectedExitState(pete::Stop)
+}
+
+/// Options controlling bitcode generation that we need to plumb through most of the process
+struct BCOpts<'a> {
+    /// The clang command to use to generate bitcode
+    clang_path : OsString,
+    /// The directory to store generated bitcode in
+    bitcode_directory : Option<&'a PathBuf>,
+    /// If true, do *not* force the generation of debug information
+    suppress_automatic_debug : bool
 }
 
 pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i32> {
@@ -124,9 +134,12 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
     let (mut sender, receiver) = mpsc::channel();
     let stream_output = bitcode_options.verbose;
     let event_consumer = thread::spawn(move || { collect_events(stream_output, receiver) });
-    let clang_path = bitcode_options.clang_path.as_ref().map(|s| OsString::from(s.as_path().as_os_str()))
-                                                        .unwrap_or(OsString::from("clang"));
-    let ptracer1 = generate_bitcode(&mut sender, ptracer, clang_path.as_ref(), bitcode_options.bcout_path.as_ref())?;
+    let bc_opts = BCOpts { clang_path : bitcode_options.clang_path.as_ref().map(|s| OsString::from(s.as_path().as_os_str()))
+                                                        .unwrap_or(OsString::from("clang")),
+                           bitcode_directory : bitcode_options.bcout_path.as_ref(),
+                           suppress_automatic_debug : bitcode_options.suppress_automatic_debug
+    };
+    let ptracer1 = generate_bitcode(&mut sender, ptracer, &bc_opts)?;
 
     // Send a token to shut down the event collector thread
     sender.send(None)?;
@@ -185,15 +198,19 @@ fn make_bitcode_filename(target : &OsString, bc_dir : Option<&PathBuf>) -> PathB
 /// do not want for bitcode generation), as well as transforming the output file
 /// path
 fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
-                           bc_command : &OsStr,
-                           orig_args : &[OsString],
-                           bc_dir : Option<&PathBuf>) -> anyhow::Result<BitcodeArguments> {
+                           bc_opts : &BCOpts,
+                           orig_args : &[OsString]) -> anyhow::Result<BitcodeArguments> {
     let mut orig_target = None;
     let mut new_target = OsString::from("");
     let mut modified_args = Vec::new();
 
     // We always need to add this key flag
     modified_args.push(OsString::from("-emit-llvm"));
+
+    // Force debug information (unless directed not to)
+    if !bc_opts.suppress_automatic_debug {
+        modified_args.push(OsString::from("-g"));
+    }
 
     // Next, copy over all of the flags we want to keep
     let mut it = orig_args.iter();
@@ -212,11 +229,11 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
         if arg == "-o" {
             match it.next() {
                 None => {
-                    return Err(anyhow::Error::new(BitcodeError::MissingOutputFile(Path::new(bc_command).to_path_buf(), Vec::from(orig_args))));
+                    return Err(anyhow::Error::new(BitcodeError::MissingOutputFile(Path::new(&bc_opts.clang_path).to_path_buf(), Vec::from(orig_args))));
                 }
                 Some(target) => {
                     orig_target = Some(PathBuf::from(&target).into_os_string());
-                    let target_path = make_bitcode_filename(target, bc_dir);
+                    let target_path = make_bitcode_filename(target, bc_opts.bitcode_directory);
                     new_target = OsString::from(target_path.clone());
                     modified_args.push(target_path.into_os_string());
                 }
@@ -246,7 +263,7 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
                     resolved_bitcode_target = OsString::from(bc_path.clone());
                 }
                 Err(msg) => {
-                    let _res = chan.send(Some(Event::MultipleInputsWithImplicitOutput(bc_command.to_os_string(), orig_args.to_vec())));
+                    let _res = chan.send(Some(Event::MultipleInputsWithImplicitOutput(bc_opts.clang_path.to_os_string(), orig_args.to_vec())));
                     return Err(anyhow::Error::new(msg));
                 }
             }
@@ -262,17 +279,16 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
 }
 
 fn build_bitcode_compile_only(chan : &mut mpsc::Sender<Option<Event>>,
-                              bc_command : &OsStr,
+                              bc_opts : &BCOpts,
                               args : &[OsString],
-                              cwd : &Path,
-                              bcdir : Option<&PathBuf>
+                              cwd : &Path
 ) -> anyhow::Result<()> {
-    let bc_args = build_bitcode_arguments(chan, bc_command, args, bcdir)?;
+    let bc_args = build_bitcode_arguments(chan, bc_opts, args)?;
 
     if !obj_already_has_bitcode(cwd, &bc_args.resolved_object_target) {
         let _res = chan.send(Some(Event::BitcodeGenerationAttempts));
 
-        let child = process::Command::new(&bc_command).
+        let child = process::Command::new(&bc_opts.clang_path).
             args(&bc_args.bitcode_arguments).
             current_dir(cwd).
             stdout(process::Stdio::piped()).
@@ -282,13 +298,13 @@ fn build_bitcode_compile_only(chan : &mut mpsc::Sender<Option<Event>>,
         if out.status.success() {
             attach_bitcode(chan, cwd, &bc_args.resolved_object_target, &bc_args.resolved_bitcode_target)?;
         } else {
-            let err = Event::BitcodeCompileError(Path::new(bc_command).to_path_buf(),
+            let err = Event::BitcodeCompileError(Path::new(&bc_opts.clang_path).to_path_buf(),
                                                  Vec::from(bc_args.bitcode_arguments.clone()),
                                                  out.stdout,
                                                  out.stderr,
                                                  out.status.code());
             let _res = chan.send(Some(err))?;
-            return Err(anyhow::Error::new(BitcodeError::ErrorGeneratingBitcode(Path::new(bc_command).to_path_buf(),
+            return Err(anyhow::Error::new(BitcodeError::ErrorGeneratingBitcode(Path::new(&bc_opts.clang_path).to_path_buf(),
                                                                                Vec::from(bc_args.bitcode_arguments))));
         }
     }
@@ -753,8 +769,7 @@ fn handle_process_exit(chan : &mut mpsc::Sender<Option<Event>>,
                        pid : pete::Pid,
                        exit_code : i32,
                        process_state : &mut HashMap<i32, ProcessState>,
-                       clang_path : &OsStr,
-                       bcout_path : Option<&PathBuf>
+                       bc_opts : &BCOpts
 ) {
     let ipid = pid.as_raw() as i32;
     match process_state.remove(&ipid) {
@@ -782,7 +797,7 @@ fn handle_process_exit(chan : &mut mpsc::Sender<Option<Event>>,
                 return;
             }
             // The process successfully exec'd - see if we want to do anything with it
-            post_process_actions(rc, chan, clang_path, bcout_path);
+            post_process_actions(rc, chan, bc_opts);
         }
     }
 }
@@ -859,8 +874,7 @@ fn should_make_bc(rc : &RunCommand, comp_mods : &CompileModifiers) -> bool {
 /// completion of a build process action.
 fn post_process_actions(rc : RunCommand,
                         chan : &mut mpsc::Sender<Option<Event>>,
-                        clang_path : &OsStr,
-                        bcout_path : Option<&PathBuf>
+                        bc_opts : &BCOpts
 ) {
     let comp_mods = extract_compile_modifiers(&rc);
     if should_make_bc(&rc, &comp_mods) {
@@ -872,7 +886,7 @@ fn post_process_actions(rc : RunCommand,
         // We drop the first argument because it is just the
         // original command name (i.e., argv[0])
         let (_, rest_args) = rc.args.split_at(1);
-        match build_bitcode_compile_only(chan, clang_path, rest_args, &rc.cwd, bcout_path) {
+        match build_bitcode_compile_only(chan, bc_opts, rest_args, &rc.cwd) {
             Err(err) => { println!("Error building bitcode: {:?}", err) }
             Ok(_) => {}
         }
@@ -901,8 +915,7 @@ fn post_process_actions(rc : RunCommand,
 
 fn generate_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
                     mut ptracer : pete::Ptracer,
-                    clang_path : &OsStr,
-                    bcout_path : std::option::Option<&PathBuf>
+                    bc_opts : &BCOpts
 ) -> anyhow::Result<(pete::Ptracer, i32)> {
     let mut process_state = HashMap::new();
     let syscalls = load_syscalls();
@@ -940,7 +953,7 @@ fn generate_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
             }
             pete::Stop::Exiting { exit_code }=> {
                 last_exitcode = exit_code;
-                handle_process_exit(chan, tracee.pid, exit_code, &mut process_state, clang_path, bcout_path);
+                handle_process_exit(chan, tracee.pid, exit_code, &mut process_state, bc_opts);
             }
             _ => {}
         }
