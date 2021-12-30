@@ -717,6 +717,61 @@ fn handle_process_exit(chan : &mut mpsc::Sender<Option<Event>>,
     }
 }
 
+/// Compilation modifiers are flags that can be passed to the compiler that
+/// affect our handling of the command
+///
+/// We need to process the command line to determine which of these is actually set
+struct CompileModifiers {
+    /// Corresponding to the -c flag, which tells the compiler to make an unlinked object file
+    is_compile_only : bool,
+    /// Corresponding to specifying pipe IO either for an input or output (passing -)
+    is_pipe_io : bool,
+    /// Corresponding to the command line being specified with a response file (filename prefixed with @)
+    is_response_file : bool,
+    /// Corresponding to the compile command including -S to generate an assembly file instead of an object file
+    is_assemble_only : bool,
+    /// Corresponding to the -E preprocess only flag
+    is_pre_proc_only : bool
+}
+
+fn extract_compile_modifiers(rc : &RunCommand) -> CompileModifiers {
+    let mut mods = CompileModifiers { is_compile_only : false,
+                                      is_pipe_io : false,
+                                      is_response_file : false,
+                                      is_assemble_only : false,
+                                      is_pre_proc_only : false
+    };
+
+    for arg in &rc.args {
+        mods.is_compile_only = mods.is_compile_only || arg == "-c";
+
+        // We want to recognize cases where the compilation
+        // input is stdin or the output is stdout; we can't
+        // replicate those build steps since we don't know
+        // where either is really going to/coming from.
+        mods.is_pipe_io = mods.is_pipe_io || arg == "-";
+
+        // We could potentially track builds that assemble-only, but the
+        // worry is that gnarly things happen to artifacts constructed
+        // that way that we might miss (e.g., evil mangler scripts whose
+        // effects can't be mirrored on llvm assembly).
+        //
+        // For now, ignore them.  This could be guarded behind an
+        // option.
+        mods.is_assemble_only = mods.is_assemble_only || arg == "-S";
+
+        // There is no code generated in preprocess only mode, so there is
+        // nothing for build-bom to do
+        mods.is_pre_proc_only = mods.is_pre_proc_only || arg == "-E";
+
+        // We would ideally like to handle response files, but we can't yet.
+        // For now, we'll have to ignore them.
+        mods.is_response_file = mods.is_response_file || arg.to_str().unwrap().starts_with("@");
+    }
+
+    mods
+}
+
 /// Determine what actions should be taken on the successful execution
 /// completion of a build process action.
 fn post_process_actions(rc : RunCommand,
@@ -725,34 +780,13 @@ fn post_process_actions(rc : RunCommand,
                         bcout_path : Option<&PathBuf>
 ) {
     let cmd_path = Path::new(&rc.bin);
-    let mut has_compile_only_flag = false;
-    let mut has_pipe_io = false;
-    let mut has_responsefile = false;
-    let mut is_assemble_only = false;
-    let mut is_pre_proc_only = false;
-    for arg in &rc.args {
-        has_compile_only_flag = has_compile_only_flag || arg == "-c";
-        // We want to recognize cases where the compilation
-        // input is stdin or the output is stdout; we can't
-        // replicate those build steps since we don't know
-        // where either is really going to/coming from.
-        has_pipe_io = has_pipe_io || arg == "-";
-        // We could potentially track builds that assemble-only, but the
-        // worry is that gnarly things happen to artifacts constructed
-        // that way that we might miss (e.g., evil mangler scripts whose
-        // effects can't be mirrored on llvm assembly).
-        //
-        // For now, ignore them.  This could be guarded behind an
-        // option.
-        is_assemble_only = is_assemble_only || arg == "-S";
-        is_pre_proc_only = is_pre_proc_only || arg == "-E";
-        has_responsefile = has_responsefile || arg.to_str().unwrap().starts_with("@");
-    }
+    let comp_mods = extract_compile_modifiers(&rc);
+
     let should_make_bc = match cmd_path.file_name() {
         None => { false }
         Some(cmd_file_name) => {
-            has_compile_only_flag &&
-                !has_pipe_io && !is_assemble_only && !is_pre_proc_only &&
+            comp_mods.is_compile_only &&
+                !comp_mods.is_pipe_io && !comp_mods.is_assemble_only && !comp_mods.is_pre_proc_only &&
                 clang_support::is_compile_command_name(cmd_file_name)
         }
     };
@@ -775,17 +809,17 @@ fn post_process_actions(rc : RunCommand,
         // could not attempt to generate bitcode.  Ignore
         // pre-processor-only invocations, since they don't generate
         // object code anyhow.
-        if !is_pre_proc_only {
-            if has_pipe_io {
+        if !comp_mods.is_pre_proc_only {
+            if comp_mods.is_pipe_io {
                 // Ignore send failures... that really shouldn't happen and
                 // we don't want to kill the tracer thread.
                 let _res = chan.send(Some(Event::PipeInputOrOutput(rc.clone())));
             }
-            if has_responsefile {
+            if comp_mods.is_response_file {
                 let _res = chan.send(Some(Event::ResponseFile(rc.clone())));
             }
 
-            if is_assemble_only {
+            if comp_mods.is_assemble_only {
                 let _res = chan.send(Some(Event::SkippingAssembleOnlyCommand(rc)));
             }
         }
