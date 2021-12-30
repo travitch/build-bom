@@ -66,7 +66,7 @@ fn test_zlib() -> anyhow::Result<()> {
     conf.run()?;
 
     let cmd_opts = vec![String::from("make")];
-    let gen_opts = BitcodeOptions { clang_path: user_clang_cmd(), bcout_path: None, verbose: false, command: cmd_opts };
+    let gen_opts = BitcodeOptions { clang_path: user_clang_cmd(), bcout_path: None, verbose: false, original_flags: false, command: cmd_opts };
     gen_bitcode(gen_opts)?;
 
     let mut so_path = std::path::PathBuf::new();
