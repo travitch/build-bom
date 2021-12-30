@@ -398,6 +398,71 @@ fn obj_already_has_bitcode(cwd : &Path, obj_target : &OsString) -> bool {
         }
 }
 
+/// Given the name (path) of a tar file on disk, use objcopy to inject it into
+/// the distinguished ELF section for holding the bitcode (see `ELF_SECTION_NAME`)
+fn inject_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
+                  cwd : &Path,
+                  orig_target : &OsString,
+                  bc_target : &OsString,
+                  tar_name : &String,
+                  object_path : &OsString) -> anyhow::Result<()> {
+    let mut objcopy_args = Vec::new();
+    objcopy_args.push(OsString::from("--add-section"));
+    objcopy_args.push(OsString::from(format!("{}={}", ELF_SECTION_NAME, tar_name)));
+    objcopy_args.push(object_path.into());
+
+    match process::Command::new("objcopy").args(&objcopy_args).stdout(process::Stdio::piped()).stderr(process::Stdio::piped()).current_dir(cwd).spawn() {
+        Err(msg) => {
+            let objcopy_ver = get_objcopy_version_info();
+            return Err(anyhow::Error::new(BitcodeError::ErrorAttachingBitcode(cwd.to_path_buf(), orig_target.clone(), bc_target.clone(), msg, objcopy_ver)));
+        }
+        Ok(child) => {
+            let out = child.wait_with_output()?;
+            if !out.status.success() {
+                let err = Event::BitcodeAttachError(Path::new("objcopy").to_path_buf(),
+                                                    Vec::from(objcopy_args),
+                                                    out.stdout,
+                                                    out.stderr,
+                                                    out.status.code());
+                let _res = chan.send(Some(err))?;
+            } else {
+                    let _res = chan.send(Some(Event::BitcodeCaptured(Path::new(bc_target).to_path_buf())));
+            }
+
+            Ok(())
+        }
+    }
+}
+
+/// Create a singleton tar file with the bitcode file.
+///
+/// We use the original relative name to make it easy to unpack.
+///
+/// In most cases, this should avoid duplicates, but it is possible that
+/// there could be collisions if the build system does a lot of changing of
+/// directories with source files that have similar names.
+///
+/// To avoid collisions, we append a hash to each filename
+fn build_bitcode_tar(bc_target : &OsString,
+                     bc_path : &Path,
+                     hash : &[u8],
+                     tar_file : &mut tempfile::NamedTempFile) -> anyhow::Result<()> {
+    let mut tb = tar::Builder::new(tar_file);
+    let bc_target_path = Path::new(bc_target);
+
+
+    let mut archived_name = OsString::new();
+    archived_name.push(bc_target_path.file_stem().unwrap());
+    archived_name.push("-");
+    archived_name.push(hex::encode(hash));
+    archived_name.push(".");
+    archived_name.push(bc_target_path.extension().unwrap());
+
+    tb.append_path_with_name(bc_path, &archived_name)?;
+    tb.into_inner()?;
+
+    Ok(())
+}
 
 /// Attach the bitcode file at the given path to its associated object file target
 ///
@@ -418,61 +483,23 @@ fn attach_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
     hasher.update(bc_content);
     let hash = hasher.finalize();
 
+    // This temporary file is filled in by `build_bitcode_tar`; however, we
+    // allocate it here so that it is still in scope (i.e., not deleted) when we
+    // invoke `inject_bitcode`
     let mut tar_file = tempfile::NamedTempFile::new()?;
+    build_bitcode_tar(bc_target, bc_path.as_path(), hash.as_slice(), &mut tar_file)?;
+
     let tar_name = OsString::from(tar_file.path());
-    let mut tb = tar::Builder::new(&mut tar_file);
-    // Create a singleton tar file with the bitcode file.
-    //
-    // We use the original relative name to make it easy to unpack.
-    //
-    // In most cases, this should avoid duplicates, but it is possible that
-    // there could be collisions if the build system does a lot of changing of
-    // directories with source files that have similar names.
-    //
-    // To avoid collisions, we append a hash to each filename
-    let bc_target_path = Path::new(bc_target);
-    let mut archived_name = OsString::new();
-    archived_name.push(bc_target_path.file_stem().unwrap());
-    archived_name.push("-");
-    archived_name.push(hex::encode(hash));
-    archived_name.push(".");
-    archived_name.push(bc_target_path.extension().unwrap());
-
-    tb.append_path_with_name(bc_path, &archived_name)?;
-    tb.into_inner()?;
-
-    let mut objcopy_args = Vec::new();
-    objcopy_args.push(OsString::from("--add-section"));
     let ok_tar_name = tar_name.into_string().ok().unwrap();
-    objcopy_args.push(OsString::from(format!("{}={}", ELF_SECTION_NAME, ok_tar_name)));
-    objcopy_args.push(object_path.into_os_string());
-
-    match process::Command::new("objcopy").args(&objcopy_args).stdout(process::Stdio::piped()).stderr(process::Stdio::piped()).current_dir(cwd).spawn() {
-        Err(msg) => {
-            let objcopy_ver = get_objcopy_version_info();
-            return Err(anyhow::Error::new(BitcodeError::ErrorAttachingBitcode(cwd.to_path_buf(), orig_target.clone(), bc_target.clone(), msg, objcopy_ver)));
-        }
-        Ok(child) => {
-            let out = child.wait_with_output()?;
-            if !out.status.success() {
-                let err = Event::BitcodeAttachError(Path::new("objcopy").to_path_buf(),
-                                                    Vec::from(objcopy_args),
-                                                    out.stdout,
-                                                    out.stderr,
-                                                    out.status.code());
-                let _res = chan.send(Some(err))?;
-            } else {
-                    let _res = chan.send(Some(Event::BitcodeCaptured(bc_target_path.to_path_buf())));
-            }
-
-            Ok(())
-        }
-    }
+    let opath = object_path.into_os_string();
+    inject_bitcode(chan, cwd, orig_target, bc_target, &ok_tar_name, &opath)
 }
 
 pub const ELF_SECTION_NAME : &str = ".llvm_bitcode";
 
-
+/// Attempt to invoke objcopy to see what version it is (to report failures)
+///
+/// Note that ideally we will switch to using and ELF reader/writer library instead.
 fn get_objcopy_version_info() -> String {
     match process::Command::new("objcopy")
         .arg("--version")
