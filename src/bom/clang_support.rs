@@ -1,5 +1,7 @@
 use std::ffi::OsStr;
 
+/// Regular expressions for the programs that are recognized as C/C++ compilers
+/// that we can interpose on and substitute a clang call to generate bitcode
 static COMPILE_COMMANDS: &'static [&str] =
     &[r"gcc",
       r"g\+\+",
@@ -17,6 +19,8 @@ lazy_static::lazy_static! {
     static ref COMPILE_COMMAND_RE : regex::RegexSet = regex::RegexSet::new(COMPILE_COMMANDS).unwrap();
 }
 
+/// Return true if the given command matches one of our regular expressions for
+/// known C/C++ compiler commands
 pub fn is_compile_command_name(cmd_name : &OsStr) -> bool {
     match cmd_name.to_str() {
         None => { false }
@@ -66,6 +70,7 @@ lazy_static::lazy_static! {
     static ref SINGLE_ARG_OPTION_RE : regex::RegexSet = regex::RegexSet::new(SINGLE_ARG_OPTIONS).unwrap();
 }
 
+/// Return true if the argument is a gcc/clang option that takes a single argument
 pub fn is_unary_option(arg : &OsStr) -> bool {
     match arg.to_str() {
         None => { false }
@@ -79,6 +84,7 @@ lazy_static::lazy_static! {
     static ref OTHER_ARG_PREFIX_RE : regex::Regex = regex::Regex::new(r"-.*").unwrap();
 }
 
+/// Return true if the argument is a gcc/clang option that takes no arguments
 pub fn is_nullary_option(arg : &OsStr) -> bool {
     match arg.to_str() {
         None => { false }

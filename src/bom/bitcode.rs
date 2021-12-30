@@ -845,6 +845,8 @@ fn generate_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
     Ok((ptracer, last_exitcode))
 }
 
+/// Try our best to decode a raw string into a string we can use (still an
+/// OsString)
 fn decode_raw_string(rs : &RawString) -> anyhow::Result<OsString> {
     match rs {
         RawString::SafeString(s) => { Ok(OsString::from(s)) }
