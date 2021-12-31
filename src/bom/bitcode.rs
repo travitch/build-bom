@@ -75,6 +75,7 @@
 // to extract any requested bitcode file; the build tree no longer
 // needs to be present.
 
+use regex::RegexSet;
 use std::collections::HashMap;
 use std::path::{Path,PathBuf};
 use std::io::Read;
@@ -108,7 +109,11 @@ struct BCOpts<'a> {
     /// The directory to store generated bitcode in
     bitcode_directory : Option<&'a PathBuf>,
     /// If true, do *not* force the generation of debug information
-    suppress_automatic_debug : bool
+    suppress_automatic_debug : bool,
+    /// Arguments to inject when building bitcode
+    inject_arguments : &'a Vec<String>,
+    /// Arguments to remove when building bitcode
+    remove_arguments : RegexSet
 }
 
 pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i32> {
@@ -134,10 +139,25 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
     let (mut sender, receiver) = mpsc::channel();
     let stream_output = bitcode_options.verbose;
     let event_consumer = thread::spawn(move || { collect_events(stream_output, receiver) });
+
+    // This is a bit awkward. We would like to take a union over all of our
+    // regexes so that we only need to perform the match test once per argument
+    // (pre-computing the necessary automaton).
+    //
+    // However, RegexSet only takes a sequence of `str`, which is not what we
+    // have. We pre-parsed all of the user inputs into `Regex` already. It is
+    // nice to parse those as soon as possible to give the user early feedback
+    // that their regex is wrong. As a result, we have to convert *back* to str
+    // here.
+    let rx_strs = bitcode_options.remove_arguments.iter().map(|rx| rx.as_str());
+    let remove_rx = RegexSet::new(rx_strs)?;
+
     let bc_opts = BCOpts { clang_path : bitcode_options.clang_path.as_ref().map(|s| OsString::from(s.as_path().as_os_str()))
                                                         .unwrap_or(OsString::from("clang")),
                            bitcode_directory : bitcode_options.bcout_path.as_ref(),
-                           suppress_automatic_debug : bitcode_options.suppress_automatic_debug
+                           suppress_automatic_debug : bitcode_options.suppress_automatic_debug,
+                           inject_arguments : &bitcode_options.inject_arguments,
+                           remove_arguments : remove_rx
     };
     let ptracer1 = generate_bitcode(&mut sender, ptracer, &bc_opts)?;
 
@@ -212,6 +232,12 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
         modified_args.push(OsString::from("-g"));
     }
 
+    // Add any arguments that the user directed us to
+    let mut add_it = bc_opts.inject_arguments.iter();
+    while let Some(arg) = add_it.next() {
+        modified_args.push(OsString::from(arg));
+    }
+
     // Next, copy over all of the flags we want to keep
     let mut it = orig_args.iter();
     while let Some(arg) = it.next() {
@@ -220,7 +246,14 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
             continue;
         }
 
-        modified_args.push(OsString::from(arg.to_owned()));
+        if arg.to_str().map_or(false, |s| bc_opts.remove_arguments.is_match(s)) {
+            // Reject arguments matching any of the user-provided regexes.  Note
+            // that this is of course as unsafe as users make it.  In
+            // particular, rejecting '-o' would be very bad.
+            continue;
+        } else {
+            modified_args.push(OsString::from(arg.to_owned()));
+        }
 
         // If the argument specifies the output file, we need to munge the name
         // of the output file (which is the next argument) to have an

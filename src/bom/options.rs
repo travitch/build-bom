@@ -1,3 +1,4 @@
+use regex::Regex;
 use structopt::StructOpt;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -38,6 +39,10 @@ pub struct BitcodeOptions {
     pub verbose : bool,
     #[structopt(long="suppress-automatic-debug", help="Prevent `build-bom` from automatically injecting flags to generate debug information in bitcode files")]
     pub suppress_automatic_debug : bool,
+    #[structopt(long="inject-argument", help="Have `build-bom` inject the given argument into the argument list when generating bitcode")]
+    pub inject_arguments : Vec<String>,
+    #[structopt(long="remove-argument", help="Have `build-bom` remove arguments matching the given regular expression when generating bitcode")]
+    pub remove_arguments : Vec<Regex>,
     #[structopt(last = true, help="The build command to run")]
     pub command : Vec<String>
 }
