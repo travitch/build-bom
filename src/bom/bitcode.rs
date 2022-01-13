@@ -129,7 +129,7 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
     let _child = ptracer.spawn(cmd);
     match ptracer.wait()? {
         None => {
-            println!("Error spawning tracee");
+            println!("Error spawning tracee (command: {})", bitcode_options.command.join(" "));
         }
         Some(tracee) => {
             ptracer.restart(tracee, pete::Restart::Syscall)?;

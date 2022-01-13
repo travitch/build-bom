@@ -33,7 +33,7 @@ pub fn trace_entrypoint(trace_opts : &TraceOptions) -> anyhow::Result<()> {
     let _child = ptracer.spawn(cmd);
     match ptracer.wait()? {
         None => {
-            println!("Error spawning tracee");
+            println!("Error spawning tracee (command: {})", trace_opts.command.join(" "));
         }
         Some(tracee1) => {
             let root_pid = tracee1.pid;
@@ -205,5 +205,3 @@ fn record_events(file_path : PathBuf, rdr : PipeReader, root_pid : i32) -> anyho
     }
     Ok(())
 }
-
-
