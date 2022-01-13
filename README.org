@@ -36,7 +36,6 @@ In the next step, the tool extracts all of the accumulated bitcode.
 
 The ~generate-bitcode~ command has a number of options that may be useful in various contexts.
 
-- ~--dry-run~: Replays the build without taking action
 - ~--clang~: Specify the full name (or path if desired) of a clang binary to use
 - ~--suppress-automatic-debug~: By default, ~build-bom~ automatically adds the ~-g~ flag when building bitcode to generate debug information; this flag inhibits this behavior
 - ~--inject-argument=STRING~: Directs ~build-bom~ to inject an additional argument (~STRING~) into the command line for the command used to build bitcode (e.g., to configure the optimization level or level of debug information); can be specified multiple times
