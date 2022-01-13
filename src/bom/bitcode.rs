@@ -226,6 +226,10 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
 
     // We always need to add this key flag
     modified_args.push(OsString::from("-emit-llvm"));
+    // Always add the -c flag; if we don't, bitcode built from a compile command
+    // that doesn't already specify -c, it will fail because you cannot specify
+    // -emit-llvm when generating an executable
+    modified_args.push(OsString::from("-c"));
 
     // Force debug information (unless directed not to)
     if !bc_opts.suppress_automatic_debug {
@@ -896,9 +900,9 @@ fn should_make_bc(rc : &RunCommand, comp_mods : &CompileModifiers) -> bool {
     match cmd_path.file_name() {
         None => { false }
         Some(cmd_file_name) => {
-            comp_mods.is_compile_only &&
-                !comp_mods.is_pipe_io && !comp_mods.is_assemble_only && !comp_mods.is_pre_proc_only &&
-                clang_support::is_compile_command_name(cmd_file_name)
+            clang_support::is_compile_command_name(cmd_file_name) &&
+                (comp_mods.is_compile_only ||
+                !comp_mods.is_pipe_io && !comp_mods.is_assemble_only && !comp_mods.is_pre_proc_only)
         }
     }
 }
