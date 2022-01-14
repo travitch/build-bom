@@ -99,7 +99,9 @@ pub enum TracerError {
     #[error("No tracee on top-level subprocess exit")]
     NoTraceeOnExit,
     #[error("Unexpected exit state on top-level subprocess exit")]
-    UnexpectedExitState(pete::Stop)
+    UnexpectedExitState(pete::Stop),
+    #[error("No command given")]
+    NoCommandGiven
 }
 
 /// Options controlling bitcode generation that we need to plumb through most of the process
@@ -117,6 +119,10 @@ struct BCOpts<'a> {
 }
 
 pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i32> {
+    if bitcode_options.command.len() == 0 {
+        return Err(anyhow::Error::new(TracerError::NoCommandGiven));
+    }
+
     let (cmd0, args0) = bitcode_options.command.split_at(1);
     let cmd_path = which::which(OsString::from(&cmd0[0]))?;
 
