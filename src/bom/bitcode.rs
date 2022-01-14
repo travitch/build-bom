@@ -844,8 +844,6 @@ fn handle_process_exit(chan : &mut mpsc::Sender<Option<Event>>,
 ///
 /// We need to process the command line to determine which of these is actually set
 struct CompileModifiers {
-    /// Corresponding to the -c flag, which tells the compiler to make an unlinked object file
-    is_compile_only : bool,
     /// Corresponding to specifying pipe IO either for an input or output (passing -)
     is_pipe_io : bool,
     /// Corresponding to the command line being specified with a response file (filename prefixed with @)
@@ -857,16 +855,13 @@ struct CompileModifiers {
 }
 
 fn extract_compile_modifiers(rc : &RunCommand) -> CompileModifiers {
-    let mut mods = CompileModifiers { is_compile_only : false,
-                                      is_pipe_io : false,
+    let mut mods = CompileModifiers { is_pipe_io : false,
                                       is_response_file : false,
                                       is_assemble_only : false,
                                       is_pre_proc_only : false
     };
 
     for arg in &rc.args {
-        mods.is_compile_only = mods.is_compile_only || arg == "-c";
-
         // We want to recognize cases where the compilation
         // input is stdin or the output is stdout; we can't
         // replicate those build steps since we don't know
@@ -900,9 +895,10 @@ fn should_make_bc(rc : &RunCommand, comp_mods : &CompileModifiers) -> bool {
     match cmd_path.file_name() {
         None => { false }
         Some(cmd_file_name) => {
-            clang_support::is_compile_command_name(cmd_file_name) &&
-                (comp_mods.is_compile_only ||
-                !comp_mods.is_pipe_io && !comp_mods.is_assemble_only && !comp_mods.is_pre_proc_only)
+            clang_support::is_compile_command_name(cmd_file_name) && // Is this a compile command we recognize
+                !comp_mods.is_pipe_io &&                             // Pipe input can't be re-processed a second time (so generating bitcode would fail; the pipe is already drained)
+                !comp_mods.is_assemble_only &&                       // In an assemble-only build, there is no object file to attach the bitcode to
+                !comp_mods.is_pre_proc_only                          // Similarly, in a preprocess only build we have no object file to attach bitcode to
         }
     }
 }
