@@ -1,3 +1,4 @@
+use fs_extra::dir::{copy,CopyOptions};
 use std::path::{PathBuf, Path};
 use tempfile::tempdir;
 use xshell::{Cmd, pushd};
@@ -81,6 +82,41 @@ fn test_zlib() -> anyhow::Result<()> {
     bc_path.push("libz.so.1.2.11.bc");
     let bc_path2 = bc_path.clone();
     let extract_opts = ExtractOptions { input: so_path, output: bc_path, llvm_link_path: user_llvm_link_cmd() };
+    extract_bitcode(extract_opts)?;
+    assert!(bc_path2.exists());
+    Ok(())
+}
+
+#[test]
+fn test_no_compile_only() -> anyhow::Result<()> {
+    // This test builds an executable without the -c flag; we want to make sure
+    // that build-bom can recognize that and do something reasonable
+    let path = Path::new(SOURCE_DIR).join("no_compile_only");
+    let abs_path = std::fs::canonicalize(path.as_path())?;
+
+    let tdir = tempdir()?;
+    let _push1 = pushd(tdir.path())?;
+
+    let options = CopyOptions::new();
+    copy(abs_path, ".", &options)?;
+    let _push2 = pushd("no_compile_only")?;
+
+    let cmd_opts = vec![String::from("make")];
+    let gen_opts = BitcodeOptions { clang_path: user_clang_cmd(),
+                                    bcout_path: None,
+                                    suppress_automatic_debug: false,
+                                    inject_arguments: Vec::new(),
+                                    remove_arguments: Vec::new(),
+                                    verbose: false,
+                                    command: cmd_opts };
+    gen_bitcode(gen_opts)?;
+
+    let mut exe_path = std::path::PathBuf::new();
+    exe_path.push("hello-world");
+    let mut bc_path = std::path::PathBuf::new();
+    bc_path.push("hello-world.bc");
+    let bc_path2 = bc_path.clone();
+    let extract_opts = ExtractOptions { input: exe_path, output: bc_path, llvm_link_path: user_llvm_link_cmd() };
     extract_bitcode(extract_opts)?;
     assert!(bc_path2.exists());
     Ok(())
