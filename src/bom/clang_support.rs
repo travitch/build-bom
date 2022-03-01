@@ -130,7 +130,12 @@ static CLANG_ARGUMENT_BLACKLIST : &'static [&str] =
       r"-falign-loops=\d+",
       r"-mno-fp-ret-in-387",
       r"-mskip-rax-setup",
-      r"--param=.*"
+      r"--param=.*",
+      r"-quiet",
+      r"-auxbase-strip", // https://gcc.gnu.org/legacy-ml/gcc-help/2013-08/msg00067.html
+      // clang sees "-dumpbase ARG" as a "multiple output file mode"
+      // and doesn't support the use of -o with it (although gcc does)
+      r"-dumpbase"
       ];
 
 lazy_static::lazy_static! {
