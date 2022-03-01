@@ -32,6 +32,7 @@ static SINGLE_ARG_OPTIONS : &'static [&str] =
     &[r"-o",
       r"--param",
       r"-aux-info",
+      r"-auxbase-strip",
       r"-A",
       r"-D",
       r"-U",
@@ -63,7 +64,8 @@ static SINGLE_ARG_OPTIONS : &'static [&str] =
       r"-e",
       r"-rpath",
       r"-current_version",
-      r"-compatibility_version"
+      r"-compatibility_version",
+      r"-dumpbase"
     ];
 
 lazy_static::lazy_static! {
