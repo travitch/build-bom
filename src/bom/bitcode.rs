@@ -403,7 +403,10 @@ fn input_sources<'a>(args : &'a[OsString]) -> Result<&'a OsString,BitcodeError> 
     if inputs.len() == 1 {
         Ok(inputs[0])
     } else {
-        Err(BitcodeError::MultipleInputFiles(inputs.iter().map(|s| s.to_string_lossy().into_owned()).collect()))
+        Err(BitcodeError::MultipleInputFiles(
+            inputs.iter().map(|s| s.to_string_lossy().into_owned()).collect(),
+            Vec::from(args))
+        )
     }
 }
 
@@ -417,8 +420,8 @@ pub enum BitcodeError {
     ErrorGeneratingBitcode(PathBuf, Vec<OsString>),
     #[error("Unreadable memory address {0:}")]
     UnreadableMemoryAddress(u64),
-    #[error("Multiple input files found for command: {0:?}")]
-    MultipleInputFiles(Vec<String>)
+    #[error("Multiple input files found for command: files {0:?} from args {1:?}")]
+    MultipleInputFiles(Vec<String>, Vec<OsString>)
 }
 
 /// Returns true if the specified object file target already has an
