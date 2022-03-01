@@ -897,7 +897,10 @@ fn extract_compile_modifiers(rc : &RunCommand) -> CompileModifiers {
 
         // There is no code generated in preprocess only mode, so there is
         // nothing for build-bom to do
-        mods.is_pre_proc_only = mods.is_pre_proc_only || arg == "-E";
+        mods.is_pre_proc_only = mods.is_pre_proc_only
+            || arg == "-E"
+            || arg == "-M"     // implies -E
+            || arg == "-MM";   // implies -E
 
         // We would ideally like to handle response files, but we can't yet.
         // For now, we'll have to ignore them.
