@@ -3,16 +3,16 @@ use std::ffi::OsStr;
 /// Regular expressions for the programs that are recognized as C/C++ compilers
 /// that we can interpose on and substitute a clang call to generate bitcode
 static COMPILE_COMMANDS: &'static [&str] =
-    &[r"gcc",
-      r"g\+\+",
-      r"cc",
-      r"c\+\+",
-      r"clang",
-      r"clang\+\+",
-      r"clang-\d+(\.\d+)",
-      r"clang\+\+-\d+(\.\d+)",
-      r"gcc-\d+(\.\d+)",
-      r"g\+\+-\d+(\.\d+)"
+    &[r"gcc$",
+      r"g\+\+$",
+      r"cc$",
+      r"c\+\+$",
+      r"clang$",
+      r"clang\+\+$",
+      r"clang-\d+(\.\d+)$",
+      r"clang\+\+-\d+(\.\d+)$",
+      r"gcc-\d+(\.\d+)$",
+      r"g\+\+-\d+(\.\d+)$"
     ];
 
 lazy_static::lazy_static! {
