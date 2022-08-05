@@ -1,5 +1,6 @@
 use fs_extra::dir::{copy,CopyOptions};
 use std::path::{PathBuf, Path};
+use std::env;
 use tempfile::tempdir;
 use xshell::{Cmd, pushd};
 
@@ -92,7 +93,15 @@ fn test_no_compile_only() -> anyhow::Result<()> {
     // This test builds an executable without the -c flag; we want to make sure
     // that build-bom can recognize that and do something reasonable
     let path = Path::new(SOURCE_DIR).join("no_compile_only");
-    let abs_path = std::fs::canonicalize(path.as_path())?;
+    eprintln!("## Canonicalizing input: {:?} (from {:?})", path, env::current_dir());
+    let abs_path = match std::fs::canonicalize(path.as_path()) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("## Unable to canonicalize path {:?} (got {:?})", path, e);
+            return Err(From::from(e));
+        }
+    };
+    eprintln!("## Using source from: {:?}", abs_path);
 
     let tdir = tempdir()?;
     let _push1 = pushd(tdir.path())?;
@@ -101,6 +110,7 @@ fn test_no_compile_only() -> anyhow::Result<()> {
     copy(abs_path, ".", &options)?;
     let _push2 = pushd("no_compile_only")?;
 
+    eprintln!("## build-bom generate bitcode via make and clang at {:?}", user_clang_cmd());
     let cmd_opts = vec![String::from("make")];
     let gen_opts = BitcodeOptions { clang_path: user_clang_cmd(),
                                     bcout_path: None,
@@ -110,14 +120,18 @@ fn test_no_compile_only() -> anyhow::Result<()> {
                                     verbose: false,
                                     command: cmd_opts };
     gen_bitcode(gen_opts)?;
+    eprintln!("## bitcode generation complete");
 
     let mut exe_path = std::path::PathBuf::new();
     exe_path.push("hello-world");
     let mut bc_path = std::path::PathBuf::new();
     bc_path.push("hello-world.bc");
     let bc_path2 = bc_path.clone();
+    eprintln!("## extract bitcode from {:?} to {:?} using llvm-link at {:?}",
+              exe_path, bc_path, user_llvm_link_cmd());
     let extract_opts = ExtractOptions { input: exe_path, output: bc_path, llvm_link_path: user_llvm_link_cmd() };
     extract_bitcode(extract_opts)?;
+    eprintln!("## bitcode extracted");
     assert!(bc_path2.exists());
     Ok(())
 }
