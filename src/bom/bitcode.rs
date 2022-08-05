@@ -340,24 +340,33 @@ fn build_bitcode_compile_only(chan : &mut mpsc::Sender<Option<Event>>,
     if !obj_already_has_bitcode(cwd, &bc_args.resolved_object_target) {
         let _res = chan.send(Some(Event::BitcodeGenerationAttempts));
 
-        let child = process::Command::new(&bc_opts.clang_path).
+        let spawn_result = process::Command::new(&bc_opts.clang_path).
             args(&bc_args.bitcode_arguments).
             current_dir(cwd).
             stdout(process::Stdio::piped()).
             stderr(process::Stdio::piped()).
-            spawn()?;
-        let out = child.wait_with_output()?;
-        if out.status.success() {
-            attach_bitcode(chan, cwd, &bc_args.resolved_object_target, &bc_args.resolved_bitcode_target)?;
-        } else {
-            let err = Event::BitcodeCompileError(Path::new(&bc_opts.clang_path).to_path_buf(),
-                                                 Vec::from(bc_args.bitcode_arguments.clone()),
-                                                 out.stdout,
-                                                 out.stderr,
-                                                 out.status.code());
-            let _res = chan.send(Some(err))?;
-            return Err(anyhow::Error::new(BitcodeError::ErrorGeneratingBitcode(Path::new(&bc_opts.clang_path).to_path_buf(),
-                                                                               Vec::from(bc_args.bitcode_arguments))));
+            spawn();
+        match spawn_result {
+            Ok(child) => {
+                let out = child.wait_with_output()?;
+                if out.status.success() {
+                    attach_bitcode(chan, cwd, &bc_args.resolved_object_target, &bc_args.resolved_bitcode_target)?;
+                } else {
+                    let err = Event::BitcodeCompileError(Path::new(&bc_opts.clang_path).to_path_buf(),
+                                                         Vec::from(bc_args.bitcode_arguments.clone()),
+                                                         out.stdout,
+                                                         out.stderr,
+                                                         out.status.code());
+                    let _res = chan.send(Some(err))?;
+                    return Err(anyhow::Error::new(BitcodeError::ErrorGeneratingBitcode(Path::new(&bc_opts.clang_path).to_path_buf(),
+                                                                                       Vec::from(bc_args.bitcode_arguments))));
+                }
+            }
+            Err(e) => {
+                return Err(anyhow::Error::new(BitcodeError::ErrorCodeGeneratingBitcode(Path::new(&bc_opts.clang_path).to_path_buf(),
+                                                                                       Vec::from(bc_args.bitcode_arguments),
+                                                                                       e)));
+            }
         }
     }
 
@@ -425,8 +434,10 @@ pub enum BitcodeError {
     ErrorAttachingBitcode(PathBuf, OsString, OsString, std::io::Error, String),
     #[error("Missing output file in command {0:?} {1:?}")]
     MissingOutputFile(PathBuf, Vec<OsString>),
-    #[error("Error generating bitcode with command {0:?} {1:?})")]
+    #[error("Error generating bitcode with command {0:?} {1:?}")]
     ErrorGeneratingBitcode(PathBuf, Vec<OsString>),
+    #[error("Error {2:?} generating bitcode with command {0:?} {1:?}")]
+    ErrorCodeGeneratingBitcode(PathBuf, Vec<OsString>, std::io::Error),
     #[error("Unreadable memory address {0:}")]
     UnreadableMemoryAddress(u64),
     #[error("Multiple input files found for command: files {0:?} from args {1:?}")]
