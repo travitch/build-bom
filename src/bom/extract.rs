@@ -37,11 +37,11 @@ pub fn extract_bitcode_entrypoint(extract_options : &ExtractOptions) -> anyhow::
     let ok_tar_name = OsString::from(tar_path).into_string().unwrap();
     objcopy_args.push(OsString::from(format!("{}={}", ELF_SECTION_NAME, ok_tar_name)));
     objcopy_args.push(OsString::from(&extract_options.input));
-    // The objres is the obligatory but unneeded rewritten object file; it is in
-    // the temp directory and will therefore be automatically discarded..
+    // The objres is the obligatory but unneeded rewritten object file target.
+    // Since this isn't needed, simply use /dev/null (currently only targeting
+    // Unix support).
     let mut objres = PathBuf::new();
-    objres.push(tmp_dir.path());
-    objres.push("ignored-out-file");
+    objres.push("/dev/null");
     objcopy_args.push(OsString::from(objres));
 
     match Command::new("objcopy").args(&objcopy_args).spawn() {
