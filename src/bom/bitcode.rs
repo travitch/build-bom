@@ -242,6 +242,10 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
         modified_args.push(OsString::from("-g"));
     }
 
+    // Sometimes -Werror might be in the arguments, so make sure this doesn't
+    // cause a failure exit if any other command-line arguments are unused.
+    modified_args.push(OsString::from("-Wno-error=unused-command-line-argument"));
+
     // Add any arguments that the user directed us to
     let mut add_it = bc_opts.inject_arguments.iter();
     while let Some(arg) = add_it.next() {
