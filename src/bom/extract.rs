@@ -17,12 +17,33 @@ pub fn extract_bitcode_entrypoint(extract_options : &ExtractOptions) -> anyhow::
     tar_path.push(tmp_dir.path());
     tar_path.push("bitcode.tar");
 
-    // Use objcopy to extract our tar file from the target
+    // Use objcopy to extract our tar file from the target.
+    //
+    // Note that objcopy wants to create an output file and if not given an
+    // output file it will try to copy the input file to an adjacent temp file
+    // and thus require write permissions to the directory and input file.
+    //
+    // For the generate-bitcode phase, this is not a problem (and is a desired
+    // feature since that phase adds the bitcode to the original object file),
+    // but the extraction phase may be run at a later time, and possibly on
+    // installed files (for which the user has no write permissions).
+    //
+    // There is no need for a modified object file in the extraction phase, but
+    // objcopy will insist on generating one, so giving it an output target in
+    // the same temp directory where the extracted bitcode tar file will be
+    // written avoids the permissions issues.
     let mut objcopy_args = Vec::new();
     objcopy_args.push(OsString::from("--dump-section"));
     let ok_tar_name = OsString::from(tar_path).into_string().unwrap();
     objcopy_args.push(OsString::from(format!("{}={}", ELF_SECTION_NAME, ok_tar_name)));
     objcopy_args.push(OsString::from(&extract_options.input));
+    // The objres is the obligatory but unneeded rewritten object file target.
+    // Since this isn't needed, simply use /dev/null (currently only targeting
+    // Unix support).
+    let mut objres = PathBuf::new();
+    objres.push("/dev/null");
+    objcopy_args.push(OsString::from(objres));
+
     match Command::new("objcopy").args(&objcopy_args).spawn() {
         Err(msg) => {
             return Err(anyhow::Error::new(ExtractError::ErrorRunningCommand(String::from("objcopy"), objcopy_args, msg)));
@@ -62,6 +83,9 @@ pub fn extract_bitcode_entrypoint(extract_options : &ExtractOptions) -> anyhow::
             let _rc = child.wait();
         }
     }
+
+    // Now all the files contained in the extracted bitcode.tar should be linked together
+    // to create the final bitcode file.
 
     let mut llvm_link_args = Vec::new();
     llvm_link_args.push(OsString::from("-o"));
