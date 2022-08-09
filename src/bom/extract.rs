@@ -17,31 +17,42 @@ pub fn extract_bitcode_entrypoint(extract_options : &ExtractOptions) -> anyhow::
     tar_path.push(tmp_dir.path());
     tar_path.push("bitcode.tar");
 
-    // Use objcopy to extract our tar file from the target.
+    // Use objcopy to extract our tar file from the target.  Note that objcopy
+    // expects to write an output object.  If not given an output file, it will
+    // try to replace the input file with the generated version by copying the
+    // input file to a temporary file (adjacent to the input file) and then
+    // reading that temporary file to rewriting the input file with the output
+    // data.
     //
-    // Note that objcopy wants to create an output file and if not given an
-    // output file it will try to copy the input file to an adjacent temp file
-    // and thus require write permissions to the directory and input file.
+    // This is not necessarily a problem for the use of objcopy during the
+    // generate-bitcode phase, but extraction may be performed from installed
+    // targets where the current user does not have permissions to create a
+    // temporary file adjacent to the installed target.
     //
-    // For the generate-bitcode phase, this is not a problem (and is a desired
-    // feature since that phase adds the bitcode to the original object file),
-    // but the extraction phase may be run at a later time, and possibly on
-    // installed files (for which the user has no write permissions).
+    // The most obvious solution is to supply /dev/null as the output file: then
+    // the input file is not copied to an adjacent location and the objcopy can
+    // run as needed.  This works... except for when the input file is an archive
+    // (a.k.a static library file, as in libxyz.a).  When the input file is an
+    // archive file, then objcopy appears to create a temporary output file for
+    // each member of the archive and then re-combine those into the output
+    // archive file.  The problem is that the temporary output files are adjacent
+    // to the provided output file, thus when /dev/null is provided as the output
+    // file, objcopy with an archive input will try to write to /dev/{tempfile},
+    // which fails.
     //
-    // There is no need for a modified object file in the extraction phase, but
-    // objcopy will insist on generating one, so giving it an output target in
-    // the same temp directory where the extracted bitcode tar file will be
-    // written avoids the permissions issues.
+    // Thus the more robust solution is to specify the output file in a temporary
+    // directory, and there is already a convenient temporary directory created
+    // above to hold the output llvm bitcode tar file.
     let mut objcopy_args = Vec::new();
     objcopy_args.push(OsString::from("--dump-section"));
     let ok_tar_name = OsString::from(tar_path).into_string().unwrap();
     objcopy_args.push(OsString::from(format!("{}={}", ELF_SECTION_NAME, ok_tar_name)));
+
     objcopy_args.push(OsString::from(&extract_options.input));
-    // The objres is the obligatory but unneeded rewritten object file target.
-    // Since this isn't needed, simply use /dev/null (currently only targeting
-    // Unix support).
+
     let mut objres = PathBuf::new();
-    objres.push("/dev/null");
+    objres.push(tmp_dir.path());
+    objres.push("discard{output-file}");
     objcopy_args.push(OsString::from(objres));
 
     match Command::new("objcopy").args(&objcopy_args).spawn() {
