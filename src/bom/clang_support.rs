@@ -135,7 +135,8 @@ static CLANG_ARGUMENT_BLACKLIST : &'static [&str] =
       r"-auxbase-strip", // https://gcc.gnu.org/legacy-ml/gcc-help/2013-08/msg00067.html
       // clang sees "-dumpbase ARG" as a "multiple output file mode"
       // and doesn't support the use of -o with it (although gcc does)
-      r"-dumpbase"
+      r"-dumpbase",
+      r"^-M{1,2}D$",
       ];
 
 lazy_static::lazy_static! {
