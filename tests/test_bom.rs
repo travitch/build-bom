@@ -1,4 +1,5 @@
 use fs_extra::dir::{copy,CopyOptions};
+use std::ffi::OsStr;
 use std::path::{PathBuf, Path};
 use std::env;
 use tempfile::tempdir;
@@ -6,6 +7,7 @@ use xshell::{Cmd, pushd};
 
 use bom;
 use bom::bom::options::{Options,Subcommand,BitcodeOptions,ExtractOptions};
+use bom::bom::clang_support::{is_blacklisted_clang_argument};
 
 static SOURCE_DIR: &'static str = "tests/sources";
 
@@ -49,6 +51,19 @@ fn extract_bitcode(extract_opts : ExtractOptions) -> anyhow::Result<()> {
     let extract_opt = Options { subcommand: extract_cmd };
     let rc = bom::run_bom(extract_opt)?;
     assert_eq!(rc, 0);
+    Ok(())
+}
+
+#[test]
+fn test_blacklist() -> anyhow::Result<()> {
+    assert!(!is_blacklisted_clang_argument(OsStr::new("-D")));
+    assert!(is_blacklisted_clang_argument(OsStr::new("-MD")));
+    assert!(is_blacklisted_clang_argument(OsStr::new("-MMD")));
+    assert!(!is_blacklisted_clang_argument(OsStr::new("-MMMD")));
+    assert!(!is_blacklisted_clang_argument(OsStr::new("-MMD2")));
+    assert!(!is_blacklisted_clang_argument(OsStr::new("-mmd")));
+    assert!(!is_blacklisted_clang_argument(OsStr::new("MMD")));
+    assert!(!is_blacklisted_clang_argument(OsStr::new("--file=my-MMD")));
     Ok(())
 }
 
