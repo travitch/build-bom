@@ -411,11 +411,12 @@ fn input_sources<'a>(args : &'a[OsString]) -> Result<&'a OsString,BitcodeError> 
     let mut inputs = Vec::new();
     let mut it = args.iter();
     while let Some(arg) = it.next() {
-        if clang_support::is_unary_option(arg) {
-            // Discard the next argument since it can't be a source file
-            let _next_arg = it.next();
-        } else if clang_support::is_nullary_option(arg) {
-            // Just ignore it
+        if clang_support::is_option_arg(arg) {
+            if clang_support::is_unary_option(arg) {
+                // Discard the next argument since it can't be a source file
+                let _next_arg = it.next();
+            }
+            // ignore it whether there's a following argument or not
         } else {
             // This is an argument
             inputs.push(arg);
