@@ -82,18 +82,12 @@ pub fn is_unary_option(arg : &OsStr) -> bool {
     }
 }
 
-lazy_static::lazy_static! {
-    static ref OTHER_ARG_PREFIX_RE : regex::Regex = regex::Regex::new(r"-.*").unwrap();
-}
 
-/// Return true if the argument is a gcc/clang option that takes no arguments
-pub fn is_nullary_option(arg : &OsStr) -> bool {
-    match arg.to_str() {
-        None => { false }
-        Some(arg_str) => {
-            OTHER_ARG_PREFIX_RE.is_match(arg_str)
-        }
-    }
+/// Return true if the argument is a gcc/clang option.  This is primarily used to
+/// determine if this argument should be skipped when searching for filenames on
+/// the compilation command line.
+pub fn is_option_arg(arg : &OsStr) -> bool {
+    arg.to_str().map( |s| s.chars().nth(0) ).flatten() == Some('-')
 }
 
 static CLANG_ARGUMENT_BLACKLIST : &'static [&str] =
