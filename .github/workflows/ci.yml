@@ -13,8 +13,8 @@ jobs:
         with:
           command: build
       - name: install test deps
-        run: sudo apt install clang-9 llvm-9 wget
+        run: sudo apt install clang-12 llvm-12 wget
       - name: test
         # Note: individual tests will change directory to run in specific
         # locations, so they must be run consecutively (--test-threads=1).
-        run: CLANG=clang-9 LLVM_LINK=llvm-link-9 cargo test -- --test-threads=1
+        run: CLANG=clang-12 LLVM_LINK=llvm-link-12 cargo test -- --test-threads=1
