@@ -140,22 +140,31 @@ fn test_option_recognition() -> anyhow::Result<()> {
 
 #[test]
 fn test_blacklist() -> anyhow::Result<()> {
-    assert!(!is_blacklisted_clang_argument(OsStr::new("-D")));
-    assert!(is_blacklisted_clang_argument(OsStr::new("-MD")));
-    assert!(is_blacklisted_clang_argument(OsStr::new("-MMD")));
-    assert!(!is_blacklisted_clang_argument(OsStr::new("-MMMD")));
-    assert!(!is_blacklisted_clang_argument(OsStr::new("-MMD2")));
-    assert!(!is_blacklisted_clang_argument(OsStr::new("-mmd")));
-    assert!(!is_blacklisted_clang_argument(OsStr::new("MMD")));
-    assert!(!is_blacklisted_clang_argument(OsStr::new("--file=my-MMD")));
+    assert!(!is_blacklisted_clang_argument(false, OsStr::new("-D")));
+    assert!(is_blacklisted_clang_argument(false, OsStr::new("-MD")));
+    assert!(is_blacklisted_clang_argument(false, OsStr::new("-MMD")));
+    assert!(!is_blacklisted_clang_argument(false, OsStr::new("-MMMD")));
+    assert!(!is_blacklisted_clang_argument(false, OsStr::new("-MMD2")));
+    assert!(!is_blacklisted_clang_argument(false, OsStr::new("-mmd")));
+    assert!(!is_blacklisted_clang_argument(false, OsStr::new("MMD")));
+    assert!(!is_blacklisted_clang_argument(false, OsStr::new("--file=my-MMD")));
 
-    assert!(is_blacklisted_clang_argument(OsStr::new("-quiet")));
-    assert!(!is_blacklisted_clang_argument(OsStr::new("--quiet")));
-    assert!(!is_blacklisted_clang_argument(OsStr::new("-quieter")));
+    assert!(is_blacklisted_clang_argument(false, OsStr::new("-quiet")));
+    assert!(!is_blacklisted_clang_argument(false, OsStr::new("--quiet")));
+    assert!(!is_blacklisted_clang_argument(false, OsStr::new("-quieter")));
 
-    assert!(is_blacklisted_clang_argument(OsStr::new("--param=")));
-    assert!(is_blacklisted_clang_argument(OsStr::new("--param=something")));
-    assert!(is_blacklisted_clang_argument(OsStr::new("--param=\"many things\"")));
+    assert!(is_blacklisted_clang_argument(false, OsStr::new("--param=")));
+    assert!(is_blacklisted_clang_argument(false, OsStr::new("--param=something")));
+    assert!(is_blacklisted_clang_argument(false, OsStr::new("--param=\"many things\"")));
+
+    // Some arguments are only blacklisted if not in strict mode:
+    assert!(is_blacklisted_clang_argument(false, OsStr::new("-O2")));
+    assert!(is_blacklisted_clang_argument(false, OsStr::new("-Ofast")));
+    assert!(is_blacklisted_clang_argument(false, OsStr::new("-march=arm")));
+
+    assert!(!is_blacklisted_clang_argument(true, OsStr::new("-O2")));
+    assert!(!is_blacklisted_clang_argument(true, OsStr::new("-Ofast")));
+    assert!(!is_blacklisted_clang_argument(true, OsStr::new("-march=arm")));
 
     Ok(())
 }
@@ -183,6 +192,7 @@ fn test_zlib() -> anyhow::Result<()> {
                                     inject_arguments: Vec::new(),
                                     remove_arguments: Vec::new(),
                                     verbose: false,
+                                    strict: false,
                                     command: cmd_opts };
     gen_bitcode(gen_opts)?;
 
@@ -227,6 +237,7 @@ fn test_no_compile_only() -> anyhow::Result<()> {
                                     inject_arguments: Vec::new(),
                                     remove_arguments: Vec::new(),
                                     verbose: false,
+                                    strict: false,
                                     command: cmd_opts };
     gen_bitcode(gen_opts)?;
     eprintln!("## bitcode generation complete");
