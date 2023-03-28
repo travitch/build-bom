@@ -193,8 +193,20 @@ static CLANG_ARGUMENT_BLACKLIST : &'static [&str] =
       r"^-auxbase-strip$", // https://gcc.gnu.org/legacy-ml/gcc-help/2013-08/msg00067.html
       // clang sees "-dumpbase ARG" as a "multiple output file mode"
       // and doesn't support the use of -o with it (although gcc does)
-      r"-dumpbase",
+      r"^-dumpbase$",
+      r"^-fdump-rtl-",
       r"^-M{1,2}D$",
+      r"^-d[MDNIU]$",
+      r"^-Q$",
+      // LLVM bitcode is reasonably generic to any machine type (this is not
+      // entirely true, but sufficiently so for the types of analyses that the
+      // bitcode is intended to be used for); remove any target machine
+      // specifications to avoid aborts due to unsupported targets.
+      r"^-march=",
+      r"^-mtune=",
+      r"^-mcpu=",
+      r"^-mfpmath=",
+      r"^-masm=",
       ];
 
 lazy_static::lazy_static! {
