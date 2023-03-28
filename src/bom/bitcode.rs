@@ -275,24 +275,38 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
             skip_next = clang_support::next_arg_is_option_value(arg);  // hopeful here...
             continue;
         } else {
-            modified_args.push(OsString::from(arg.to_owned()));
+            if arg.to_str().unwrap().starts_with("-o") {
+                modified_args.push("-o".into());
+            } else {
+                modified_args.push(OsString::from(arg.to_owned()));
+            }
         }
 
         // If the argument specifies the output file, we need to munge the name
-        // of the output file (which is the next argument) to have an
-        // appropriate extension and to put it in the requested bitcode
-        // directory (if any)
-        if arg == "-o" {
-            match it.next() {
-                None => {
-                    return Err(anyhow::Error::new(BitcodeError::MissingOutputFile(Path::new(&bc_opts.clang_path).to_path_buf(), Vec::from(orig_args))));
+        // of the output file (which is either the remainder of this argument or
+        // the next argument) to have an appropriate extension and to put it in
+        // the requested bitcode directory (if any)
+        if arg.to_str().unwrap().starts_with("-o") {
+            if arg == "-o" {
+                match it.next() {
+                    None => {
+                        return Err(anyhow::Error::new(BitcodeError::MissingOutputFile(Path::new(&bc_opts.clang_path).to_path_buf(), Vec::from(orig_args))));
+                    }
+                    Some(target) => {
+                        orig_target = Some(PathBuf::from(&target).into_os_string());
+                        let target_path = make_bitcode_filename(target, bc_opts.bitcode_directory);
+                        new_target = OsString::from(target_path.clone());
+                        modified_args.push(target_path.into_os_string());
+                    }
                 }
-                Some(target) => {
-                    orig_target = Some(PathBuf::from(&target).into_os_string());
-                    let target_path = make_bitcode_filename(target, bc_opts.bitcode_directory);
-                    new_target = OsString::from(target_path.clone());
-                    modified_args.push(target_path.into_os_string());
-                }
+            } else {
+                let (_,tgt) = arg.to_str().unwrap().split_at(2);
+                let target = OsString::from(tgt);
+                let target_path = make_bitcode_filename(&target,
+                                                        bc_opts.bitcode_directory);
+                orig_target = Some(target);
+                new_target = OsString::from(target_path.clone());
+                modified_args.push(target_path.into_os_string());
             }
         }
     }
@@ -1054,4 +1068,99 @@ fn make_command(bin : &RawString, args : &[RawString], env : anyhow::Result<Vec<
 
     let cmd = RunCommand { bin : decode_raw_string(bin)?, args : os_args, env : env?, cwd : cwd? };
     Ok(cmd)
+}
+
+
+#[cfg(test)]
+mod tests {
+
+    use std::sync::mpsc;
+    use super::*;
+
+    #[test]
+    fn test_bitcode_compile_args() -> anyhow::Result<()> {
+        let (mut sender, receiver) = mpsc::channel();
+        let mut bcdir = PathBuf::new();
+        bcdir.push("path");
+        bcdir.push("to");
+        bcdir.push("bitcode");
+        let bcopts = BCOpts { clang_path: "/path/to/clang".into(),
+                              bitcode_directory: Some(&bcdir),
+                              suppress_automatic_debug: false,
+                              inject_arguments: &Vec::from(
+                                  [ "-arg1",
+                                      "-arg2",
+                                      "arg2val"
+                                  ].map(|s| String::from(s))),
+                              remove_arguments: regex::RegexSet::new(
+                                  [r"^-remove$", r"^--this" ]
+                              ).unwrap()
+        };
+
+        // Simple cmdline specification
+        let bcargs1 = build_bitcode_arguments(&mut sender, &bcopts,
+                                              &[ "-g", "-O1", "-o", "foo.obj",
+                                                   "-DDebug",
+                                                   "bar.c"
+                                              ].map(|s| s.into()));
+        match bcargs1 {
+            Err(e) => assert_eq!(e.to_string(), "<no error expected>"),
+            Ok(a) => {
+                assert_eq!(a.bitcode_arguments,
+                           [ "-emit-llvm",
+                               "-c",
+                               "-g",
+                               "-Wno-error=unused-command-line-argument",
+                               "-arg1",
+                               "-arg2", "arg2val",
+                               "-g",
+                               "-O1",
+                               "-o",
+                               "path/to/bitcode/foo.bc",
+                               "-DDebug",
+                               "bar.c"
+                           ]);
+                assert_eq!(a.resolved_bitcode_target, "path/to/bitcode/foo.bc");
+                assert_eq!(a.resolved_object_target, "foo.obj");
+                let chan_out = receiver.try_recv();
+                assert!(chan_out.is_err());
+                assert_eq!(chan_out.err(), Some(mpsc::TryRecvError::Empty));
+            }
+        }
+
+        // Alternate cmdline specification
+        let bcargs2 = build_bitcode_arguments(&mut sender, &bcopts,
+                                              &[ "-ofoo.obj",
+                                                   "-remove",
+                                                   "-O",
+                                                   "--this=remove-also",
+                                                   "-DDebug",
+                                                   "bar.c"
+                                              ].map(|s| s.into()));
+        match bcargs2 {
+            Err(e) => assert_eq!(e.to_string(), "<no error expected>"),
+            Ok(a) => {
+                assert_eq!(a.bitcode_arguments,
+                           [ "-emit-llvm",
+                               "-c",
+                               "-g",
+                               "-Wno-error=unused-command-line-argument",
+                               "-arg1",
+                               "-arg2", "arg2val",
+                               "-o",
+                               "path/to/bitcode/foo.bc",
+                               "-O",
+                               "-DDebug",
+                               "bar.c"
+                           ]);
+                assert_eq!(a.resolved_bitcode_target, "path/to/bitcode/foo.bc");
+                assert_eq!(a.resolved_object_target, "foo.obj");
+                let chan_out = receiver.try_recv();
+                assert!(chan_out.is_err());
+                assert_eq!(chan_out.err(), Some(mpsc::TryRecvError::Empty));
+            }
+        }
+
+        Ok(())
+    }
 }
