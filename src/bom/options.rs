@@ -44,7 +44,9 @@ pub struct BitcodeOptions {
     #[structopt(long="remove-argument", help="Have `build-bom` remove arguments matching the given regular expression when generating bitcode")]
     pub remove_arguments : Vec<Regex>,
     #[structopt(last = true, help="The build command to run")]
-    pub command : Vec<String>
+    pub command : Vec<String>,
+    #[structopt(long="strict", help="Generate bitcode that strictly adheres to the target object code (optimization levels, target architecture, etc.).")]
+    pub strict : bool
 }
 
 #[derive(Debug,StructOpt)]

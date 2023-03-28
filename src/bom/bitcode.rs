@@ -116,6 +116,9 @@ struct BCOpts<'a> {
     inject_arguments : &'a Vec<String>,
     /// Arguments to remove when building bitcode
     remove_arguments : &'a RegexSet,
+    /// Strict: maintain strict adherence between the bitcode and the target code
+    /// (optimization, target architecture, etc.)
+    strict : bool
 }
 
 pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i32> {
@@ -163,7 +166,8 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
                            bitcode_directory : &bitcode_options.bcout_path.as_ref(),
                            suppress_automatic_debug : bitcode_options.suppress_automatic_debug,
                            inject_arguments : &bitcode_options.inject_arguments,
-                           remove_arguments : &remove_rx
+                           remove_arguments : &remove_rx,
+                           strict : bitcode_options.strict
     };
     let ptracer1 = generate_bitcode(&mut sender, ptracer, &bc_opts)?;
 
@@ -242,6 +246,13 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
         modified_args.push(OsString::from("-g"));
     }
 
+    // If not in strict mode, explicitly disable optimization (favoring a maximal
+    // amount of information in the generated bitcode and avoiding things like
+    // inlining, dead code elimination, etc.
+    if !bc_opts.strict {
+        modified_args.push(OsString::from("-O0"));
+    }
+
     // Sometimes -Werror might be in the arguments, so make sure this doesn't
     // cause a failure exit if any other command-line arguments are unused.
     modified_args.push(OsString::from("-Wno-error=unused-command-line-argument"));
@@ -263,7 +274,7 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
         }
 
         // Skip any arguments explicitly blacklisted
-        if clang_support::is_blacklisted_clang_argument(arg) {
+        if clang_support::is_blacklisted_clang_argument(bc_opts.strict, arg) {
             skip_next = clang_support::next_arg_is_option_value(arg);
             continue;
         }
@@ -1095,15 +1106,43 @@ mod tests {
                               remove_arguments: &regex::RegexSet::new(
                                   [r"^-remove$", r"^--this" ],
 
-                              ).unwrap()
-        };
+                              ).unwrap(),
+                              strict: false };
 
         // Simple cmdline specification
-        let bcargs1 = build_bitcode_arguments(&mut sender, &bcopts,
-                                              &[ "-g", "-O1", "-o", "foo.obj",
-                                                   "-DDebug",
-                                                   "bar.c"
-                                              ].map(|s| s.into()));
+        let args = [ "-g", "-O1", "-o", "foo.obj",
+                       "-march=mips",
+                       "-DDebug",
+                       "bar.c" ].map(|s| s.into());
+        let bcargs1 = build_bitcode_arguments(&mut sender, &bcopts, &args);
+        match bcargs1 {
+            Err(e) => assert_eq!(e.to_string(), "<no error expected>"),
+            Ok(a) => {
+                assert_eq!(a.bitcode_arguments,
+                           [ "-emit-llvm",
+                               "-c",
+                               "-g",
+                               "-O0",
+                               "-Wno-error=unused-command-line-argument",
+                               "-arg1",
+                               "-arg2", "arg2val",
+                               "-g",
+                               "-o",
+                               "path/to/bitcode/foo.bc",
+                               "-DDebug",
+                               "bar.c"
+                           ]);
+                assert_eq!(a.resolved_bitcode_target, "path/to/bitcode/foo.bc");
+                assert_eq!(a.resolved_object_target, "foo.obj");
+                let chan_out = receiver.try_recv();
+                assert!(chan_out.is_err());
+                assert_eq!(chan_out.err(), Some(mpsc::TryRecvError::Empty));
+            }
+        }
+
+        // Simple cmdline specification, strict bitcode
+        let bcopts_strict = BCOpts { strict: true, ..bcopts };
+        let bcargs1 = build_bitcode_arguments(&mut sender, &bcopts_strict, &args);
         match bcargs1 {
             Err(e) => assert_eq!(e.to_string(), "<no error expected>"),
             Ok(a) => {
@@ -1118,6 +1157,7 @@ mod tests {
                                "-O1",
                                "-o",
                                "path/to/bitcode/foo.bc",
+                               "-march=mips",
                                "-DDebug",
                                "bar.c"
                            ]);
@@ -1145,12 +1185,12 @@ mod tests {
                            [ "-emit-llvm",
                                "-c",
                                "-g",
+                               "-O0",
                                "-Wno-error=unused-command-line-argument",
                                "-arg1",
                                "-arg2", "arg2val",
                                "-o",
                                "path/to/bitcode/foo.bc",
-                               "-O",
                                "-DDebug",
                                "bar.c"
                            ]);

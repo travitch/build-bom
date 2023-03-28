@@ -198,28 +198,49 @@ static CLANG_ARGUMENT_BLACKLIST : &'static [&str] =
       r"^-M{1,2}D$",
       r"^-d[MDNIU]$",
       r"^-Q$",
-      // LLVM bitcode is reasonably generic to any machine type (this is not
-      // entirely true, but sufficiently so for the types of analyses that the
-      // bitcode is intended to be used for); remove any target machine
-      // specifications to avoid aborts due to unsupported targets.
-      r"^-march=",
-      r"^-mtune=",
-      r"^-mcpu=",
-      r"^-mfpmath=",
-      r"^-masm=",
       ];
+
+
+/// The following are also blacklisted *unless* the --strict flag was used to
+/// invoke build-bom.  Removing these arguments can allow the bitcode to be
+/// somewhat different than the actual compiled code.
+static CLANG_ARGUMENT_STRICT_WHITELIST : &'static [&str] =
+    &[
+        // LLVM bitcode is reasonably generic to any machine type (this is not
+        // entirely true, but sufficiently so for many types of analyses that the
+        // bitcode is intended to be used for).  The advantage to removing these
+        // (ofsetting the disadvantage of small divergences) is that the
+        // installed LLVM don't necessarily need to support cross-compilation to
+        // the same targets that the main compiler is targeting.
+        r"^-march=",
+        r"^-mtune=",
+        r"^-mcpu=",
+        r"^-mfpmath=",
+        r"^-masm=",
+
+        // Disable *all* optimization.  This can allow the generated bitcode to
+        // be more comprehensive (e.g. no inlining, no dead code removal),
+        // although it is potentially less-representative of the actually
+        // executed code.
+        r"^-O$",
+        r"^-O[0123gsz]$",
+        r"^-Ofast$",
+        r"^-Osize$",
+    ];
 
 lazy_static::lazy_static! {
     static ref CLANG_ARGUMENT_BLACKLIST_RE : regex::RegexSet = regex::RegexSet::new(CLANG_ARGUMENT_BLACKLIST).unwrap();
+    static ref CLANG_ARGUMENT_STRICT_WHITELIST_RE : regex::RegexSet = regex::RegexSet::new(CLANG_ARGUMENT_STRICT_WHITELIST).unwrap();
 }
 
 /// Returns true if the argument is not accepted by clang and should be ignored
 /// when constructing clang invocations.
-pub fn is_blacklisted_clang_argument(a : &OsStr) -> bool {
+pub fn is_blacklisted_clang_argument(strict_bc: bool, a : &OsStr) -> bool {
     match a.to_str() {
         None => { false }
         Some(str_arg) => {
-            CLANG_ARGUMENT_BLACKLIST_RE.is_match(str_arg)
+            CLANG_ARGUMENT_BLACKLIST_RE.is_match(str_arg) ||
+            (!strict_bc && CLANG_ARGUMENT_STRICT_WHITELIST_RE.is_match(str_arg))
         }
     }
 }
