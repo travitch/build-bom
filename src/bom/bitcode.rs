@@ -264,7 +264,7 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
 
         // Skip any arguments explicitly blacklisted
         if clang_support::is_blacklisted_clang_argument(arg) {
-            skip_next = clang_support::is_unary_option(arg);
+            skip_next = clang_support::next_arg_is_option_value(arg);
             continue;
         }
 
@@ -272,7 +272,7 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
             // Reject arguments matching any of the user-provided regexes.  Note
             // that this is of course as unsafe as users make it.  In
             // particular, rejecting '-o' would be very bad.
-            skip_next = clang_support::is_unary_option(arg);  // hopeful here...
+            skip_next = clang_support::next_arg_is_option_value(arg);  // hopeful here...
             continue;
         } else {
             modified_args.push(OsString::from(arg.to_owned()));
@@ -412,7 +412,7 @@ fn input_sources<'a>(args : &'a[OsString]) -> Result<&'a OsString,BitcodeError> 
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         if clang_support::is_option_arg(arg) {
-            if clang_support::is_unary_option(arg) {
+            if clang_support::next_arg_is_option_value(arg) {
                 // Discard the next argument since it can't be a source file
                 let _next_arg = it.next();
             }
