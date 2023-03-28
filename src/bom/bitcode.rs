@@ -107,15 +107,15 @@ pub enum TracerError {
 /// Options controlling bitcode generation that we need to plumb through most of the process
 struct BCOpts<'a> {
     /// The clang command to use to generate bitcode
-    clang_path : OsString,
+    clang_path : &'a OsString,
     /// The directory to store generated bitcode in
-    bitcode_directory : Option<&'a PathBuf>,
+    bitcode_directory : &'a Option<&'a PathBuf>,
     /// If true, do *not* force the generation of debug information
     suppress_automatic_debug : bool,
     /// Arguments to inject when building bitcode
     inject_arguments : &'a Vec<String>,
     /// Arguments to remove when building bitcode
-    remove_arguments : RegexSet
+    remove_arguments : &'a RegexSet,
 }
 
 pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i32> {
@@ -158,12 +158,12 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
     let rx_strs = bitcode_options.remove_arguments.iter().map(|rx| rx.as_str());
     let remove_rx = RegexSet::new(rx_strs)?;
 
-    let bc_opts = BCOpts { clang_path : bitcode_options.clang_path.as_ref().map(|s| OsString::from(s.as_path().as_os_str()))
+    let bc_opts = BCOpts { clang_path : &bitcode_options.clang_path.as_ref().map(|s| OsString::from(s.as_path().as_os_str()))
                                                         .unwrap_or(OsString::from("clang")),
-                           bitcode_directory : bitcode_options.bcout_path.as_ref(),
+                           bitcode_directory : &bitcode_options.bcout_path.as_ref(),
                            suppress_automatic_debug : bitcode_options.suppress_automatic_debug,
                            inject_arguments : &bitcode_options.inject_arguments,
-                           remove_arguments : remove_rx
+                           remove_arguments : &remove_rx
     };
     let ptracer1 = generate_bitcode(&mut sender, ptracer, &bc_opts)?;
 
@@ -204,7 +204,7 @@ struct BitcodeArguments {
     resolved_object_target : OsString
 }
 
-fn make_bitcode_filename(target : &OsString, bc_dir : Option<&PathBuf>) -> PathBuf {
+fn make_bitcode_filename(target : &OsString, bc_dir : &Option<&PathBuf>) -> PathBuf {
     let mut target_path = match bc_dir {
         None => PathBuf::from(&target),
         Some(p) => {
@@ -1084,16 +1084,17 @@ mod tests {
         bcdir.push("path");
         bcdir.push("to");
         bcdir.push("bitcode");
-        let bcopts = BCOpts { clang_path: "/path/to/clang".into(),
-                              bitcode_directory: Some(&bcdir),
+        let bcopts = BCOpts { clang_path: &"/path/to/clang".into(),
+                              bitcode_directory: &Some(&bcdir),
                               suppress_automatic_debug: false,
                               inject_arguments: &Vec::from(
                                   [ "-arg1",
                                       "-arg2",
                                       "arg2val"
                                   ].map(|s| String::from(s))),
-                              remove_arguments: regex::RegexSet::new(
-                                  [r"^-remove$", r"^--this" ]
+                              remove_arguments: &regex::RegexSet::new(
+                                  [r"^-remove$", r"^--this" ],
+
                               ).unwrap()
         };
 
