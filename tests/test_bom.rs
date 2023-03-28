@@ -7,7 +7,11 @@ use xshell::{Cmd, pushd};
 
 use bom;
 use bom::bom::options::{Options,Subcommand,BitcodeOptions,ExtractOptions};
-use bom::bom::clang_support::{is_blacklisted_clang_argument};
+use bom::bom::clang_support::{is_compile_command_name,
+                              is_option_arg,
+                              next_arg_is_option_value,
+                              is_blacklisted_clang_argument};
+
 
 static SOURCE_DIR: &'static str = "tests/sources";
 
@@ -55,6 +59,86 @@ fn extract_bitcode(extract_opts : ExtractOptions) -> anyhow::Result<()> {
 }
 
 #[test]
+fn test_is_compile_cmd() -> anyhow::Result<()> {
+    assert!(is_compile_command_name(OsStr::new("gcc")));
+    assert!(is_compile_command_name(OsStr::new("arm-musl-gcc")));
+    assert!(is_compile_command_name(OsStr::new("/usr/local/bin/gcc-9/bin/gcc")));
+    assert!(!is_compile_command_name(OsStr::new("gcc-musl-arm")));
+
+
+    assert!(is_compile_command_name(OsStr::new("arm-musl-gcc")));
+    assert!(is_compile_command_name(OsStr::new("/usr/local/bin/gcc-9/bin/gcc")));
+    assert!(!is_compile_command_name(OsStr::new("gcc-musl-arm")));
+    Ok(())
+}
+
+#[test]
+fn test_option_recognition() -> anyhow::Result<()> {
+
+    assert!(is_option_arg(OsStr::new("-o")));
+    assert!(is_option_arg(OsStr::new("-or")));
+    assert!(is_option_arg(OsStr::new("--o")));
+    assert!(is_option_arg(OsStr::new("--or")));
+    assert!(!is_option_arg(OsStr::new("o-")));
+    assert!(!is_option_arg(OsStr::new("\"-o\"")));
+
+    assert!(next_arg_is_option_value(OsStr::new("-o")));
+    assert!(next_arg_is_option_value(OsStr::new("-rpath")));
+
+    // Single-letter unary options can take their argument with no intervening
+    // space.  In that situation, the next argument is *not* the option value.
+    assert!(!next_arg_is_option_value(OsStr::new("-ofile")));
+
+    // Single-letter unary options do not use an = separator and interpret it as
+    // part of the argument value.
+    assert!(!next_arg_is_option_value(OsStr::new("-o=file")));  // value is "=file"
+
+    // Multi-letter unary options starting with two dashes can use a space or an
+    // = separator.
+    assert!(next_arg_is_option_value(OsStr::new("--param")));
+    assert!(!next_arg_is_option_value(OsStr::new("--param=x=y")));
+
+    // Multi-letter unary options starting with a single dash (non-standard)
+    // usually have a space before their argument.
+    assert!(next_arg_is_option_value(OsStr::new("-rpath")));
+    assert!(!next_arg_is_option_value(OsStr::new("-rpathfoo")));
+    assert!(!next_arg_is_option_value(OsStr::new("-rpath=foo")));
+    assert!(!next_arg_is_option_value(OsStr::new("--rpath")));
+
+    // However, some compilers have multi-letter options starting with a single
+    // dash that *can* use a = separator instead of a space.  For those, it
+    // should not indicate that the next argument is the option value.
+    assert!(next_arg_is_option_value(OsStr::new("-aux-info")));
+    assert!(!next_arg_is_option_value(OsStr::new("-aux-info=file.aux")));
+    assert!(!next_arg_is_option_value(OsStr::new("--aux-info")));
+
+    // While allowed by getopt, neither gcc nor clang (nor any other compiler we
+    // support) allows combining single-letter nullary options into a single
+    // word.  For example, "-w" and "-H" are both single letter options, but
+    // "-wH" and "-Hw" are both unrecognized.  This includes situations where the
+    // last option is a unary option.
+    //
+    // These tests assume -o is a single-letter unary option and neither Q nor Qo
+    // is a unary option.
+    assert!(!next_arg_is_option_value(OsStr::new("-Qo")));
+    assert!(!next_arg_is_option_value(OsStr::new("-oQ")));  // value is Q
+
+    // Some older tools deviate even further.  For example, "tar" has "options"
+    // but some of those options are *required*, so it always treats its first
+    // argument as options even if there's no initial dash.  This is not
+    // supported for gcc/clang/et-al, so this argument parse is not valid here.
+    assert!(!next_arg_is_option_value(OsStr::new("o")));
+
+    // Miscellaneous additional tests
+
+    assert!(!next_arg_is_option_value(OsStr::new("--o")));
+    assert!(!next_arg_is_option_value(OsStr::new("--ofile")));
+    assert!(!next_arg_is_option_value(OsStr::new("-Cofile")));
+
+    Ok(())
+}
+
+#[test]
 fn test_blacklist() -> anyhow::Result<()> {
     assert!(!is_blacklisted_clang_argument(OsStr::new("-D")));
     assert!(is_blacklisted_clang_argument(OsStr::new("-MD")));
@@ -64,8 +148,18 @@ fn test_blacklist() -> anyhow::Result<()> {
     assert!(!is_blacklisted_clang_argument(OsStr::new("-mmd")));
     assert!(!is_blacklisted_clang_argument(OsStr::new("MMD")));
     assert!(!is_blacklisted_clang_argument(OsStr::new("--file=my-MMD")));
+
+    assert!(is_blacklisted_clang_argument(OsStr::new("-quiet")));
+    assert!(!is_blacklisted_clang_argument(OsStr::new("--quiet")));
+    assert!(!is_blacklisted_clang_argument(OsStr::new("-quieter")));
+
+    assert!(is_blacklisted_clang_argument(OsStr::new("--param=")));
+    assert!(is_blacklisted_clang_argument(OsStr::new("--param=something")));
+    assert!(is_blacklisted_clang_argument(OsStr::new("--param=\"many things\"")));
+
     Ok(())
 }
+
 
 #[test]
 fn test_zlib() -> anyhow::Result<()> {
