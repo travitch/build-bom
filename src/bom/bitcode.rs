@@ -972,6 +972,7 @@ fn extract_compile_modifiers(rc : &RunCommand) -> CompileModifiers {
              //
              //  clang -v  -- non-generative config info
              //  clang -v [..anything and everything] -- non-generative config info
+             //
              || (arg == "-v" && rc.args.len() == 2)  // just $ cmd -v
 
              // This is actually generating llvm IR bitcode... but it's not an
@@ -979,7 +980,18 @@ fn extract_compile_modifiers(rc : &RunCommand) -> CompileModifiers {
              // bitcode-capture operation, but this flag suppresses object
              // code generation so it can be ignored: build-bom only captures during
              // actual object code generation.
+             //
              || arg == "-emit-llvm"
+
+             // All of these are equivalent and instruct gcc to print the name of
+             // the subprogram invoked and ignore all other args.
+             //
+             //  gcc -print-prog-name=ld
+             //  gcc --print-prog-name=ld
+             //  gcc --print-prog-name ld
+             //
+             || arg.to_str().unwrap().starts_with("--print-prog-name")
+             || arg.to_str().unwrap().starts_with("-print-prog-name=")
              );
 
     }
