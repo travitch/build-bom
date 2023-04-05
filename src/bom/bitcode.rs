@@ -992,6 +992,10 @@ fn extract_compile_modifiers(rc : &RunCommand) -> CompileModifiers {
              //
              || arg.to_str().unwrap().starts_with("--print-prog-name")
              || arg.to_str().unwrap().starts_with("-print-prog-name=")
+
+             // These also ignore all other args and just dump the requested info
+             || arg == "-print-search-dirs"
+             || arg == "--print-search-dirs"
              );
 
     }
