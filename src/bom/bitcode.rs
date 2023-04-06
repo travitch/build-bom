@@ -911,16 +911,24 @@ fn handle_process_exit(chan : &mut mpsc::Sender<Option<Event>>,
 struct CompileModifiers {
     /// Corresponding to specifying pipe IO either for an input or output (passing -)
     is_pipe_io : bool,
+
     /// Corresponding to the command line being specified with a response file (filename prefixed with @)
     is_response_file : bool,
+
     /// Corresponding to the compile command including -S to generate an assembly file instead of an object file
     is_assemble_only : bool,
-    /// Corresponding to the -E preprocess only flag
+
+    /// Corresponding to the -E preprocess only flag.  Note that this is a subset
+    /// of is_non_generative, but kept for analytical reasons.
     is_pre_proc_only : bool,
+
     /// Compiler invocation does not actually generate any code output.  For
-    /// example, "gcc --version".  Note that this is a subset of
-    /// is_non_generative, but kept for analytical reasons.
+    /// example, "gcc --version".
     is_non_generative : bool,
+
+    /// Compiler invoked post-compilation (e.g. gcc -o foo foo.obj) so no bitcode
+    /// is generated.
+    is_post_compilation : bool,
 }
 
 fn extract_compile_modifiers(rc : &RunCommand) -> CompileModifiers {
