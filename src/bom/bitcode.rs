@@ -973,13 +973,13 @@ fn extract_compile_modifiers(rc : &RunCommand) -> CompileModifiers {
              || arg == "--version"  // even "gcc --version -o foo foo.c" is non-gen
 
              // Ugh:
-             //  gcc -v   -- non-generative config info
+             //  gcc -v   # non-generative config info
              //  gcc -v --version [..anything and everything]
-             //           -- non-generative, but invokes sub-commands with -v
-             //  gcc -v -o foo foo.c  -- generative of foo, echoing sub-commands
+             //           # non-generative, but invokes sub-commands with -v
+             //  gcc -v -o foo foo.c  # generative of foo, echoing sub-commands
              //
-             //  clang -v  -- non-generative config info
-             //  clang -v [..anything and everything] -- non-generative config info
+             //  clang -v  # non-generative config info
+             //  clang -v [..anything and everything] # non-generative config info
              //
              || (arg == "-v" && rc.args.len() == 2)  // just $ cmd -v
 
