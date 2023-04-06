@@ -925,10 +925,6 @@ struct CompileModifiers {
     /// Compiler invocation does not actually generate any code output.  For
     /// example, "gcc --version".
     is_non_generative : bool,
-
-    /// Compiler invoked post-compilation (e.g. gcc -o foo foo.obj) so no bitcode
-    /// is generated.
-    is_post_compilation : bool,
 }
 
 fn extract_compile_modifiers(rc : &RunCommand) -> CompileModifiers {
