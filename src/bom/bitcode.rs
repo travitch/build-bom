@@ -451,10 +451,14 @@ fn input_sources<'a>(args : &'a[OsString]) -> Result<&'a OsString,BitcodeError> 
     if inputs.len() == 1 {
         Ok(inputs[0])
     } else {
-        Err(BitcodeError::MultipleInputFiles(
-            inputs.iter().map(|s| s.to_string_lossy().into_owned()).collect(),
-            Vec::from(args))
-        )
+        if inputs.len() == 0 {
+            Err(BitcodeError::NoInputFileFound(Vec::from(args)))
+        } else {
+            Err(BitcodeError::MultipleInputFiles(
+                inputs.iter().map(|s| s.to_string_lossy().into_owned()).collect(),
+                Vec::from(args))
+            )
+        }
     }
 }
 
@@ -470,6 +474,8 @@ pub enum BitcodeError {
     ErrorCodeGeneratingBitcode(PathBuf, Vec<OsString>, std::io::Error),
     #[error("Unreadable memory address {0:}")]
     UnreadableMemoryAddress(u64),
+    #[error("No input file found in compilation from args {0:?}")]
+    NoInputFileFound(Vec<OsString>),
     #[error("Multiple input files found for command: files {0:?} from args {1:?}")]
     MultipleInputFiles(Vec<String>, Vec<OsString>)
 }
@@ -905,19 +911,28 @@ fn handle_process_exit(chan : &mut mpsc::Sender<Option<Event>>,
 struct CompileModifiers {
     /// Corresponding to specifying pipe IO either for an input or output (passing -)
     is_pipe_io : bool,
+
     /// Corresponding to the command line being specified with a response file (filename prefixed with @)
     is_response_file : bool,
+
     /// Corresponding to the compile command including -S to generate an assembly file instead of an object file
     is_assemble_only : bool,
-    /// Corresponding to the -E preprocess only flag
-    is_pre_proc_only : bool
+
+    /// Corresponding to the -E preprocess only flag.  Note that this is a subset
+    /// of is_non_generative, but kept for analytical reasons.
+    is_pre_proc_only : bool,
+
+    /// Compiler invocation does not actually generate any code output.  For
+    /// example, "gcc --version".
+    is_non_generative : bool,
 }
 
 fn extract_compile_modifiers(rc : &RunCommand) -> CompileModifiers {
     let mut mods = CompileModifiers { is_pipe_io : false,
                                       is_response_file : false,
                                       is_assemble_only : false,
-                                      is_pre_proc_only : false
+                                      is_pre_proc_only : false,
+                                      is_non_generative : false,
     };
 
     for arg in &rc.args {
@@ -946,6 +961,47 @@ fn extract_compile_modifiers(rc : &RunCommand) -> CompileModifiers {
         // We would ideally like to handle response files, but we can't yet.
         // For now, we'll have to ignore them.
         mods.is_response_file = mods.is_response_file || arg.to_str().unwrap().starts_with("@");
+
+        // Some configurations do not generate output, and thus there is no
+        // bitcode to extract
+        mods.is_non_generative =
+            (mods.is_non_generative
+             || arg == "--version"  // even "gcc --version -o foo foo.c" is non-gen
+
+             // Ugh:
+             //  gcc -v   # non-generative config info
+             //  gcc -v --version [..anything and everything]
+             //           # non-generative, but invokes sub-commands with -v
+             //  gcc -v -o foo foo.c  # generative of foo, echoing sub-commands
+             //
+             //  clang -v  # non-generative config info
+             //  clang -v [..anything and everything] # non-generative config info
+             //
+             || (arg == "-v" && rc.args.len() == 2)  // just $ cmd -v
+
+             // This is actually generating llvm IR bitcode... but it's not an
+             // actual compilation, so it is ignored.  This may be a separate
+             // bitcode-capture operation, but this flag suppresses object
+             // code generation so it can be ignored: build-bom only captures during
+             // actual object code generation.
+             //
+             || arg == "-emit-llvm"
+
+             // All of these are equivalent and instruct gcc to print the name of
+             // the subprogram invoked and ignore all other args.
+             //
+             //  gcc -print-prog-name=ld
+             //  gcc --print-prog-name=ld
+             //  gcc --print-prog-name ld
+             //
+             || arg.to_str().unwrap().starts_with("--print-prog-name")
+             || arg.to_str().unwrap().starts_with("-print-prog-name=")
+
+             // These also ignore all other args and just dump the requested info
+             || arg == "-print-search-dirs"
+             || arg == "--print-search-dirs"
+             );
+
     }
 
     mods
@@ -960,7 +1016,8 @@ fn should_make_bc(rc : &RunCommand, comp_mods : &CompileModifiers) -> bool {
             clang_support::is_compile_command_name(cmd_file_name) && // Is this a compile command we recognize
                 !comp_mods.is_pipe_io &&                             // Pipe input can't be re-processed a second time (so generating bitcode would fail; the pipe is already drained)
                 !comp_mods.is_assemble_only &&                       // In an assemble-only build, there is no object file to attach the bitcode to
-                !comp_mods.is_pre_proc_only                          // Similarly, in a preprocess only build we have no object file to attach bitcode to
+                !comp_mods.is_pre_proc_only &&                       // Similarly, in a preprocess only build we have no object file to attach bitcode to
+                !comp_mods.is_non_generative
         }
     }
 }
@@ -986,10 +1043,10 @@ fn post_process_actions(rc : RunCommand,
             Ok(_) => {}
         }
     } else {
-        // Bump a summary stat indicating a reason why this compile
-        // could not attempt to generate bitcode.  Ignore
-        // pre-processor-only invocations, since they don't generate
-        // object code anyhow.
+        // Bump a summary stat indicating a reason why this compile could not
+        // attempt to generate bitcode.  Ignore situations where there wouldn't
+        // have been any object code generated anyhow (e.g. pre-processor-only,
+        // etc.).
         if !comp_mods.is_pre_proc_only {
             if comp_mods.is_pipe_io {
                 // Ignore send failures... that really shouldn't happen and
