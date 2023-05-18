@@ -145,7 +145,6 @@ fn test_blacklist() -> anyhow::Result<()> {
     assert!(is_blacklisted_clang_argument(false, OsStr::new("-MMD")));
     assert!(!is_blacklisted_clang_argument(false, OsStr::new("-MMMD")));
     assert!(!is_blacklisted_clang_argument(false, OsStr::new("-MMD2")));
-    assert!(!is_blacklisted_clang_argument(false, OsStr::new("-mmd")));
     assert!(!is_blacklisted_clang_argument(false, OsStr::new("MMD")));
     assert!(!is_blacklisted_clang_argument(false, OsStr::new("--file=my-MMD")));
 
@@ -161,10 +160,16 @@ fn test_blacklist() -> anyhow::Result<()> {
     assert!(is_blacklisted_clang_argument(false, OsStr::new("-O2")));
     assert!(is_blacklisted_clang_argument(false, OsStr::new("-Ofast")));
     assert!(is_blacklisted_clang_argument(false, OsStr::new("-march=arm")));
+    assert!(is_blacklisted_clang_argument(false, OsStr::new("-mmd")));
+    assert!(is_blacklisted_clang_argument(false, OsStr::new("-mspecial-arch-flag")));
+    assert!(is_blacklisted_clang_argument(false, OsStr::new("-mpreferred-stack-boundary=33")));
 
     assert!(!is_blacklisted_clang_argument(true, OsStr::new("-O2")));
     assert!(!is_blacklisted_clang_argument(true, OsStr::new("-Ofast")));
     assert!(!is_blacklisted_clang_argument(true, OsStr::new("-march=arm")));
+    assert!(!is_blacklisted_clang_argument(true, OsStr::new("-mmd")));
+    assert!(!is_blacklisted_clang_argument(true, OsStr::new("-mspecial-arch-flag")));
+    assert!(!is_blacklisted_clang_argument(true, OsStr::new("-mpreferred-stack-boundary=33")));
 
     Ok(())
 }
