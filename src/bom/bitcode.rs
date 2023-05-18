@@ -174,18 +174,25 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
     // Send a token to shut down the event collector thread
     sender.send(None)?;
     let summary = event_consumer.join().unwrap();
+    let exitmod =
+        if bitcode_options.any_fail && summary.has_failures() {
+            |ec| if ec == 0 { 76 } else { ec }
+        } else {
+            |ec| ec
+        };
     print_summary(summary);
 
     let (mut last_ptracer, exitcode) = ptracer1;
     let tracee = last_ptracer.wait()?;
     match tracee {
-        None => { Ok(exitcode) }
+        None => Ok(exitcode),
         Some(t) =>
             match t.stop {
                 pete::Stop::Exiting { exit_code: ec } => { Ok(ec) }
                 _ => { Err(anyhow::anyhow!(TracerError::UnexpectedExitState(t.stop))) }
             }
     }
+    .map(exitmod)
 }
 
 #[derive(Debug)]
@@ -707,6 +714,15 @@ fn print_summary(summary : SummaryStats) {
     println!(" {} successful bitcode captures", summary.bitcode_captures);
     println!(" last bitcode capture: {:?}", summary.last_capture_file.map_or("<none>".into(),
                                                                              |f| f.into_os_string()));
+}
+
+impl SummaryStats {
+    fn has_failures(&self) -> bool {
+        self.build_failures_skipping_bitcode > 0 ||
+            self.build_failures_unknown_effect > 0 ||
+            self.bitcode_compile_errors > 0 ||
+            self.bitcode_attach_errors > 0
+    }
 }
 
 fn collect_events(stream_errors : bool, chan : mpsc::Receiver<Option<Event>>) -> SummaryStats {

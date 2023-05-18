@@ -198,7 +198,10 @@ fn test_zlib() -> anyhow::Result<()> {
                                     remove_arguments: Vec::new(),
                                     verbose: false,
                                     strict: false,
-                                    command: cmd_opts };
+                                    command: cmd_opts,
+                                    any_fail: false };
+    // n.b. any_fail must be false because zlib runs autoconf/configure and the
+    // failures there are tallied and cause build-bom to exit with a failure.
     gen_bitcode(gen_opts)?;
 
     let mut so_path = std::path::PathBuf::new();
@@ -243,7 +246,8 @@ fn test_no_compile_only() -> anyhow::Result<()> {
                                     remove_arguments: Vec::new(),
                                     verbose: false,
                                     strict: false,
-                                    command: cmd_opts };
+                                    command: cmd_opts,
+                                    any_fail: true };
     gen_bitcode(gen_opts)?;
     eprintln!("## bitcode generation complete");
 

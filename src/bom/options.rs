@@ -46,7 +46,16 @@ pub struct BitcodeOptions {
     #[structopt(last = true, help="The build command to run")]
     pub command : Vec<String>,
     #[structopt(long="strict", help="Generate bitcode that strictly adheres to the target object code (optimization levels, target architecture, etc.).")]
-    pub strict : bool
+    pub strict : bool,
+
+    // The following is for testing only: if set, it will fail if any portion of
+    // the generate_bitcode operations fail.  In normal operation, this is false
+    // which means that the build-bom operation proceeds as long as the main
+    // compilation attempt is successful (i.e. any errors during bitcode
+    // generation are logged and counted but do not cause an overall failure
+    // result).
+    #[structopt(skip)]
+    pub any_fail : bool
 }
 
 #[derive(Debug,StructOpt)]
