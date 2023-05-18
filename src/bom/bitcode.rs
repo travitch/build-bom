@@ -981,47 +981,50 @@ fn extract_compile_modifiers(rc : &RunCommand) -> CompileModifiers {
         // Some configurations do not generate output, and thus there is no
         // bitcode to extract
         mods.is_non_generative =
-            (mods.is_non_generative
-             || arg == "--version"  // even "gcc --version -o foo foo.c" is non-gen
-
-             // Ugh:
-             //  gcc -v   # non-generative config info
-             //  gcc -v --version [..anything and everything]
-             //           # non-generative, but invokes sub-commands with -v
-             //  gcc -v -o foo foo.c  # generative of foo, echoing sub-commands
-             //
-             //  clang -v  # non-generative config info
-             //  clang -v [..anything and everything] # non-generative config info
-             //
-             || (arg == "-v" && rc.args.len() == 2)  // just $ cmd -v
-
-             // This is actually generating llvm IR bitcode... but it's not an
-             // actual compilation, so it is ignored.  This may be a separate
-             // bitcode-capture operation, but this flag suppresses object
-             // code generation so it can be ignored: build-bom only captures during
-             // actual object code generation.
-             //
-             || arg == "-emit-llvm"
-
-             // All of these are equivalent and instruct gcc to print the name of
-             // the subprogram invoked and ignore all other args.
-             //
-             //  gcc -print-prog-name=ld
-             //  gcc --print-prog-name=ld
-             //  gcc --print-prog-name ld
-             //
-             || arg.to_str().unwrap().starts_with("--print-prog-name")
-             || arg.to_str().unwrap().starts_with("-print-prog-name=")
-
-             // These also ignore all other args and just dump the requested info
-             || arg == "-print-search-dirs"
-             || arg == "--print-search-dirs"
-             );
-
+            mods.is_non_generative || arg_is_non_generative(arg, &rc.args.len());
     }
 
     mods
 }
+
+
+fn arg_is_non_generative(arg: &OsString, num_args: &usize) -> bool {
+    arg == "--version"  // even "gcc --version -o foo foo.c" is non-gen
+
+    // Ugh:
+    //  gcc -v   # non-generative config info
+    //  gcc -v --version [..anything and everything]
+    //           # non-generative, but invokes sub-commands with -v
+    //  gcc -v -o foo foo.c  # generative of foo, echoing sub-commands
+    //
+    //  clang -v  # non-generative config info
+    //  clang -v [..anything and everything] # non-generative config info
+    //
+        || (arg == "-v" && *num_args == 2)  // just $ cmd -v
+
+    // This is actually generating llvm IR bitcode... but it's not an
+    // actual compilation, so it is ignored.  This may be a separate
+    // bitcode-capture operation, but this flag suppresses object
+    // code generation so it can be ignored: build-bom only captures during
+    // actual object code generation.
+    //
+        || arg == "-emit-llvm"
+
+    // All of these are equivalent and instruct gcc to print the name of
+    // the subprogram invoked and ignore all other args.
+    //
+    //  gcc -print-prog-name=ld
+    //  gcc --print-prog-name=ld
+    //  gcc --print-prog-name ld
+    //
+        || arg.to_str().unwrap().starts_with("--print-prog-name")
+        || arg.to_str().unwrap().starts_with("-print-prog-name=")
+
+    // These also ignore all other args and just dump the requested info
+        || arg == "-print-search-dirs"
+        || arg == "--print-search-dirs"
+}
+
 
 /// Returns true if we should make bitcode given this command
 fn should_make_bc(rc : &RunCommand, comp_mods : &CompileModifiers) -> bool {
