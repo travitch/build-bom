@@ -244,7 +244,7 @@ fn test_no_compile_only() -> anyhow::Result<()> {
                                     suppress_automatic_debug: false,
                                     inject_arguments: Vec::new(),
                                     remove_arguments: Vec::new(),
-                                    verbose: false,
+                                    verbose: true,
                                     strict: false,
                                     command: cmd_opts,
                                     any_fail: true };
