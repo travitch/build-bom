@@ -158,9 +158,6 @@ static CLANG_ARGUMENT_BLACKLIST : &'static [&str] =
     &[r"^-fno-tree-loop-im$",
       r"^-Wmaybe-uninitialized$",
       r"^-Wno-maybe-uninitialized$",
-      r"^-mindirect-branch-register$",
-      r"^-mindirect-branch=",
-      r"^-mpreferred-stack-boundary=\d+$",
       r"^-Wframe-address$",
       r"^-Wno-frame-address$",
       r"^-Wno-format-truncation$",
@@ -186,8 +183,6 @@ static CLANG_ARGUMENT_BLACKLIST : &'static [&str] =
       r"^-fconserve-stack$",
       r"^-falign-jumps=\d+$",
       r"^-falign-loops=\d+$",
-      r"^-mno-fp-ret-in-387$",
-      r"^-mskip-rax-setup",
       r"^--param=",
       r"^-quiet$",
       r"^-auxbase-strip$", // https://gcc.gnu.org/legacy-ml/gcc-help/2013-08/msg00067.html
@@ -212,11 +207,11 @@ static CLANG_ARGUMENT_STRICT_WHITELIST : &'static [&str] =
         // (ofsetting the disadvantage of small divergences) is that the
         // installed LLVM don't necessarily need to support cross-compilation to
         // the same targets that the main compiler is targeting.
-        r"^-march=",
-        r"^-mtune=",
-        r"^-mcpu=",
-        r"^-mfpmath=",
-        r"^-masm=",
+        //
+        // The target here is to remove -march, -mcpu, and all other
+        // machine-specific controls, which all start with the -m prefix, thus
+        // the regexp should only match the prefix with any following text.
+        r"^-m",
 
         // Disable *all* optimization.  This can allow the generated bitcode to
         // be more comprehensive (e.g. no inlining, no dead code removal),
