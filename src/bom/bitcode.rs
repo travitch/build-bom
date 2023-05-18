@@ -8,21 +8,21 @@
 //
 // Event:
 //
-// * syscall_enter -- if this is an execve syscall, the execve target
-//                    may be a clang invocation on a source code file.
-//                    At syscall entry, the cmdline arguments are
-//                    captured for that determination later.
+// * SyscallEnter -- if this is an execve syscall, the execve target
+//                   may be a clang invocation on a source code file.
+//                   At syscall entry, the cmdline arguments are
+//                   captured for that determination later.
 //
-// * syscall_exit -- if this is the exit from an execve syscall and it
-//                   failed, the preserved arguments from above can be
-//                   discarded.  Note that even if this is an execve,
-//                   the syscall has returned to the *original*
-//                   executable (albeit to libc library code therein),
-//                   so this does *not* represent successfull
-//                   completion of the exec'd target (which may or may
-//                   not be clang).  Thus, a successful syscall_exit
-//                   leaves the cmdline argument information available
-//                   and is otherwise ignored.
+// * SyscallExit -- if this is the exit from an execve syscall and it
+//                  failed, the preserved arguments from above can be
+//                  discarded.  Note that even if this is an execve,
+//                  the syscall has returned to the *original*
+//                  executable (albeit to libc library code therein),
+//                  so this does *not* represent successfull
+//                  completion of the exec'd target (which may or may
+//                  not be clang).  Thus, a successful syscall_exit
+//                  leaves the cmdline argument information available
+//                  and is otherwise ignored.
 //
 // * Exec -- this is the trace that records the actual change of
 //           executable code to the new target.  This is actually
