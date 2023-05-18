@@ -176,6 +176,10 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
     let summary = event_consumer.join().unwrap();
     let exitmod =
         if bitcode_options.any_fail && summary.has_failures() {
+            // If the mainline succeeded (ec == 0), return an error indicating
+            // that the bitcode-generation attempt failed.  This just needs to be
+            // a non-zero value; 76 is arbitrarily chosen as possibly
+            // recognizeable for tests.
             |ec| if ec == 0 { 76 } else { ec }
         } else {
             |ec| ec
