@@ -110,8 +110,6 @@ pub enum TracerError {
 struct BCOpts<'a> {
     /// The clang command to use to generate bitcode
     clang_path : &'a OsString,
-    /// The directory to store generated bitcode in
-    bitcode_directory : &'a Option<&'a PathBuf>,
     /// If true, do *not* force the generation of debug information
     suppress_automatic_debug : bool,
     /// Arguments to inject when building bitcode
@@ -165,7 +163,6 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
 
     let bc_opts = BCOpts { clang_path : &bitcode_options.clang_path.as_ref().map(|s| OsString::from(s.as_path().as_os_str()))
                                                         .unwrap_or(OsString::from("clang")),
-                           bitcode_directory : &bitcode_options.bcout_path.as_ref(),
                            suppress_automatic_debug : bitcode_options.suppress_automatic_debug,
                            inject_arguments : &bitcode_options.inject_arguments,
                            remove_arguments : &remove_rx,
@@ -1108,7 +1105,6 @@ mod tests {
         bcdir.push("to");
         bcdir.push("bitcode");
         let bcopts = BCOpts { clang_path: &"/path/to/clang".into(),
-                              bitcode_directory: &Some(&bcdir),
                               suppress_automatic_debug: false,
                               inject_arguments: &Vec::from(
                                   [ "-arg1",
