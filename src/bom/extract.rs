@@ -82,9 +82,12 @@ pub fn extract_bitcode_entrypoint(extract_options : &ExtractOptions) -> anyhow::
         // Now all the files contained in the extracted bitcode.tar should be
         // linked together to create the final bitcode file.
 
+        let llvm_link = OsString::from(extract_options.llvm_link_path
+                                       .as_ref()
+                                       .unwrap_or(&String::from("llvm-link")));
         extract_ops.push_op(
             SubProcOperation::new(
-                &"llvm-link",
+                &llvm_link,
                 &FileSpec::Append(NamedFile::glob_in(tmp_dir.path(), "*.bc")),
                 &FileSpec::Option(String::from("-o"), NamedFile::TBD)));
 
