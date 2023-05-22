@@ -439,32 +439,41 @@ impl SubProcOperation {
     pub fn execute(&self, cwd: &Path) -> anyhow::Result<SubProcFile>
     {
         let mut args = self.args.clone();
+        let outfile = self.cmd_file_setup(&mut args)?;
+        self.run_cmd(cwd, outfile, args)
+    }
+
+    // Sets up file references for running a command
+    fn cmd_file_setup(&self, args: &mut Vec<OsString>)
+                      -> anyhow::Result<SubProcFile>
+    {
         let outfile;
         if self.emit_output_file_first() {
             outfile = self.out_file.setup_file(
-                &mut args,
+                args,
                 || Err(anyhow::Error::new(
                     SubProcError::ErrorMissingFile(String::from(&self.cmd),
                                                    String::from("output")))))?;
             self.inp_file.setup_file(
-                &mut args,
+                args,
                 || Err(anyhow::Error::new(
                     SubProcError::ErrorMissingFile(String::from(&self.cmd),
                                                    String::from("input")))))?;
         } else {
             self.inp_file.setup_file(
-                &mut args,
+                args,
                 || Err(anyhow::Error::new(
                     SubProcError::ErrorMissingFile(String::from(&self.cmd),
                                                    String::from("input")))))?;
             outfile = self.out_file.setup_file(
-                &mut args,
+                args,
                 || Err(anyhow::Error::new(
                     SubProcError::ErrorMissingFile(String::from(&self.cmd),
                                                    String::from("output")))))?;
         }
-        self.run_cmd(cwd, outfile, args)
+        Ok(outfile)
     }
+
     // Output option arguments before positional arguments because some command's
     // parsers are limited in this way.  This function returns true if the output
     // file should be specified before the input file; the normal order is input
@@ -868,5 +877,53 @@ impl ChainedOpRef {
             ops.chain[self.opidx].set_output_file(inp_spec);
         }
         self
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[test]
+    fn test_append_append() -> () {
+        let mut op = SubProcOperation::new(
+            &"test-cmd",
+            &FileSpec::Append(NamedFile::actual("inpfile.txt")),
+            &FileSpec::Append(NamedFile::temp(".out")));
+        op.push_arg("-a");
+        op.push_arg("a-arg-value");
+        op.push_arg("-b");
+
+        let mut args = op.args.clone();
+        let outfile = op.cmd_file_setup(&mut args);
+        assert_eq!(args[..args.len()-1].to_vec(),
+                   &["-a", "a-arg-value", "-b", "inpfile.txt"]);
+        assert!(match outfile {
+            Ok(SubProcFile::TempOutputFile(_)) => true,
+            _ => false
+        });
+    }
+
+    #[test]
+    fn test_append_option() -> () {
+        let mut op = SubProcOperation::new(
+            &"test-cmd",
+            &FileSpec::Append(NamedFile::actual("inpfile.txt")),
+            &FileSpec::Option("-o".to_string(), NamedFile::actual("outfile.out")));
+        op.push_arg("-a");
+        op.push_arg("a-arg-value");
+        op.push_arg("-b");
+
+        let mut args = op.args.clone();
+        let outfile = op.cmd_file_setup(&mut args);
+        assert_eq!(args,
+                   &["-a", "a-arg-value", "-b", "-o", "outfile.out", "inpfile.txt"]);
+        assert!(match outfile {
+            Ok(SubProcFile::StaticOutputFile(p)) =>
+                p == PathBuf::from("outfile.out"),
+            _ => false
+        });
     }
 }
