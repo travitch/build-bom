@@ -134,13 +134,25 @@ pub enum FileSpec {
     #[default]
     Unneeded,
 
-    /// Append the named file to the command string
+    /// Append the named file to the command string.
     Append(NamedFile),
 
-    /// first string is the option to emit, which will be followed by the file
+    /// First string is the option to emit, which will be followed by the file.
+    /// For example, Option("-f", Actual("foo.bar")) will generate:
+    ///    cmd ... -f foo.bar ...
     Option(String, NamedFile),
 
-    /// replace the specified text in any argument with the named file.
+    /// Replace the specified text in any argument with the named file.  For
+    /// example, Replace("OUTFILE", Actual("foo.bar")) will cause a command
+    /// statement like:
+    ///
+    ///    cmd -x -y --out=OUTFILE;style=json -z
+    ///
+    /// to be updated to:
+    ///
+    ///    cmd -x -y --out=foo.bar;style=json -z
+    ///
+    /// before running the command.
     Replace(String, NamedFile)
 
     // ReplaceOrAppend(String, NamedFile),  // first string string is the marker (in args) to be replaced with the file specified as the second string.  If the marker never appears, fallback to Append behavior.
