@@ -784,7 +784,6 @@ impl ChainedSubOps
                           None => vec![]
                       },
                       &chops.final_out_file)
-            .map(|r| r + 1)
     }
 }
 
