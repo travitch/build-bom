@@ -935,4 +935,220 @@ mod tests {
             _ => false
         });
     }
+
+    #[derive(Debug)]
+    struct Called(PathBuf, Vec<OsString>);
+
+    // If the string contains "<pfx>TEMPFILE#nnn.<sfx>", returns Some(pfxlen, nnn
+    // : usize, sfxlen.  If the string does not contain TEMPFILE#, returns None.
+    // Only the first TEMPFILE# is detected.
+    fn extract_tempfileref(arg: &OsString) -> Option<(usize, usize, usize)>
+    {
+        let argstr = arg.to_str()?;
+        match argstr.find("TEMPFILE#") {
+            None => None,
+            Some(si) => {
+                let ni = si + "TEMPFILE#".len();
+                let (np, sp) = argstr[ni..].split_once('.')?;
+                let nn : usize = np.parse().ok()?;
+                Some((si, nn, sp.len()))
+            }
+        }
+    }
+
+    // Extracts the temp file reference from arg and checks it against the record
+    // of that indexed temp file (or sets the index storage if not seen before).
+    // Ensures that arg matches the temp file and the remainder of arg matches
+    // against (which contained the original tempfileref).
+    fn match_tempref(temps : &mut Vec<OsString>,
+                     tempfileref : (usize, usize, usize),
+                     arg_os : &OsString,
+                     against : &OsString)
+                     -> bool
+    {
+        let (pl, tn, sl) = tempfileref;
+        let arg = match arg_os.to_str() {
+            Some(s) => s,
+            None => return false,
+        };
+        let al = arg.len();
+        if al <= pl + sl { return false; }
+        let (op, rp) = arg.split_at(pl);
+        let (tf, os) = if sl == 0 { (rp, "") } else { rp.split_at(al - sl) };
+        match temps.get(tn) {
+            None => {
+                temps.resize(tn + 1, "".into());
+                temps[tn] = tf.into();
+            },
+            Some(f) =>
+                if f == "" {
+                    temps[tn] = tf.into();
+                } else if f != tf {
+                    return false;
+                }
+        }
+        let o = match against.to_str() {
+            Some(s) => s,
+            None => return false,
+        };
+        let r = o.split_at(pl).0 == op &&
+            (if sl == 0 { "" } else { o.split_at(o.len()-sl).1 }) == os;
+        return r;
+    }
+
+    // Performs equality checking between two parallel Called objects, allowing
+    // for substitutions of temporary file references in the arguments with a
+    // consistent
+    fn eq_with_temps(tempfiles : &mut Vec<OsString>, a: &Called, b: &Called)
+                     -> bool
+    {
+        let Called(p1, v1) = a;
+        let Called(p2, v2) = b;
+        if p1 != p2 { return false; }
+        for arg in v1.into_iter().enumerate() {
+            match v2.get(arg.0) {
+                None => return false,  // argument count mismatch
+                Some(o) => {
+                    match extract_tempfileref(arg.1) {
+                        None =>
+                            match extract_tempfileref(o) {
+                                None => if arg.1 != o { return false },
+                                Some(m) =>
+                                    if !match_tempref(tempfiles, m, arg.1, o) {
+                                        return false;
+                                    }
+                            }
+                        Some(m) =>
+                            if !match_tempref(tempfiles, m, o, arg.1) {
+                                return false;
+                            }
+                    }
+                } // argument value mismatch
+            }
+        }
+        true
+    }
+
+    impl PartialEq for Called {
+        fn eq(&self, other: &Self) -> bool {
+            let mut tempfiles : Vec<OsString> = vec![];
+            eq_with_temps(&mut tempfiles, self, other)
+        }
+    }
+
+    // Compares two vectors of Called objects, with persisted temporary name
+    // substitutions.
+    fn compare_called_vecs(actual : &Vec<Called>, expected : &[Called])
+                           -> anyhow::Result<()>
+    {
+        println!("{} CALLS", actual.len());
+        for call in actual {
+            println!("  * {:?}", call);
+        }
+        assert_eq!(actual.len(), expected.len());
+        let mut tempfiles : Vec<OsString> = vec![];
+        for idx in 0..actual.len() {
+            if !eq_with_temps(&mut tempfiles, &actual[idx], &expected[idx]) {
+                assert_eq!(actual[idx], expected[idx]);
+                assert!(false);  // just in case
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_chain() -> anyhow::Result<()> {
+        let ops = ChainedSubOps::new();
+        // ops.set_inp_file_for_chain(&Some("orig.inp".into()));
+        ops.set_out_file_for_chain(&Some("final.out".into()));
+
+        let exec : Rc<RefCell<Vec<Called>>> = Rc::new(RefCell::new(vec![]));
+        let erec = exec.clone();
+        let record_exec = move |cwd : &Path, args| Ok(
+                    erec.borrow_mut().push(Called(cwd.to_path_buf(), args)));
+
+        // exec.borrow_mut().push(Called("nowhere".into(), (&[]).to_vec()));
+
+        let rslt = {
+            let op1 = ops.push_op(SubProcOperation::calling(record_exec.clone()));
+            op1.set_input(&FileSpec::Unneeded);
+            op1.set_output(&FileSpec::Option("-o".to_string(), NamedFile::temp(".c")));
+            op1.push_arg("--medium");
+
+            let op2 = ops.push_op(SubProcOperation::calling(record_exec.clone()));
+            op2.set_input(&FileSpec::Append(NamedFile::TBD));
+            op2.set_dir("/tmp");
+            op2.push_arg("-s");
+            op2.push_arg("direct");
+            op2.push_arg("--style=call");
+            op2.set_output(&FileSpec::Unneeded);
+
+            let op3 = ops.push_op(SubProcOperation::calling(record_exec.clone()));
+            op3.set_input(&FileSpec::Append(NamedFile::temp(".wow")));
+            op3.set_output(&FileSpec::Append(NamedFile::temp(".zap")));
+            op3.push_arg("--crazy");
+            op3.disable();
+
+            let op4 = ops.push_op(SubProcOperation::calling(record_exec.clone()));
+            // n.b. expects cargo-test run from top-level, where there are two
+            // files that will match this glob.  This test could be improved by
+            // creating a tempdir with specific files populating that tempdir...
+            op4.set_input(&FileSpec::Append(NamedFile::glob_in(".", "LICENSE-*")));
+            op4.set_output(&FileSpec::Unneeded);
+            // op4.set_output(&FileSpec::Append(NamedFile::temp(".glob-out")));
+            op4.push_arg("--opnum=4");
+
+            let op5 = ops.push_op(SubProcOperation::calling(record_exec.clone()));
+            op5.set_input(&FileSpec::Replace("{LICENSES}".into(),
+                                             NamedFile::glob_in(".", "LICENSE-*")));
+            op5.set_output(&FileSpec::Append(NamedFile::temp(".lic")));
+            op5.push_arg("--opnum=5");
+            op5.push_arg("--inputs={LICENSES}");
+            op5.push_arg("-c");
+            op5.disable();
+
+            let op6 = ops.push_op(SubProcOperation::calling(record_exec.clone()));
+            op6.set_input(&FileSpec::Replace("{INP}".into(), NamedFile::TBD));
+            op6.set_output(&FileSpec::Append(NamedFile::TBD));
+            op6.push_arg("--copy-from={INP}");
+
+            op5.enable();
+
+            ops.execute::<String>(&None)
+        };
+
+        assert_eq!(5, rslt?);
+        let here : PathBuf = current_dir()?.into();
+        compare_called_vecs(&*exec.borrow(),
+                   &[Called(here.clone(),
+                            ["--medium",
+                             "-o",
+                             "TEMPFILE#0.",
+                            ].map(|x| x.into()).to_vec()),
+                     Called("/tmp".into(),
+                            ["-s",
+                             "direct",
+                             "--style=call",
+                             "TEMPFILE#0.",
+                            ].map(|x| x.into()).to_vec()),
+                     Called(here.clone(),
+                            ["--opnum=4",
+                             "LICENSE-APACHE",
+                             "LICENSE-MIT",
+                            ].map(|x| x.into()).to_vec()),
+                     Called(here.clone(),
+                            ["--opnum=5",
+                             "--inputs=LICENSE-APACHE,LICENSE-MIT",
+                             "-c",
+                             "TEMPFILE#1.",
+                            ].map(|x| x.into()).to_vec()),
+                     Called(here.clone(),
+                            ["--copy-from=TEMPFILE#1.",
+                             "final.out",
+                            ].map(|x| x.into()).to_vec()),
+                   ])?;
+
+        Ok(())
+    }
+
 }
