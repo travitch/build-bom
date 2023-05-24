@@ -79,7 +79,6 @@ use std::rc::Rc;
 
 
 /// Designates a type of file that can be identified by name on the command line.
-#[non_exhaustive]
 #[derive(Clone, Debug)]
 pub enum NamedFile {
     /// Create a temporary file; str is suffix to give temporary filename
@@ -129,7 +128,6 @@ impl NamedFile {
 
 /// Determines how a file should be specified for the associated command when
 /// issuing the command at execution time.
-#[non_exhaustive]
 #[derive(Clone, Debug, Default)]
 pub enum FileSpec {
     /// No file is expressed or needed
