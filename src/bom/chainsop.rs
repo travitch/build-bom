@@ -246,7 +246,10 @@ impl FileSpec {
                             .collect::<Vec<String>>()
                             .join(",")
                             ;
-                        args.push(OsString::from(bc_files))
+                        *args =
+                            args.into_iter()
+                            .map(|arg| replace(needle, &bc_files.clone().into(), arg))
+                            .collect();
                     }
                 }
         }
