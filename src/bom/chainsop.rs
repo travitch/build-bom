@@ -303,9 +303,15 @@ enum Operation {
     Execute(OsString),
 
     /// Local function to call instead of executing a subprocess.  The first
-    /// argument is the current working directory, the second is the argument
-    /// vector (the input and output files will be part of the argument vector as
+    /// argument is the reference directory , the second is the argument vector
+    /// (the input and output files will be part of the argument vector as
     /// determined by their corresponding FileSpec).
+    ///
+    /// The reference directory would be the current directory for the
+    /// command had it been execute as a sub-process (via Operation::Execute).
+    /// The actual current directory for this process is *not* set to this
+    /// reference directory; handling of the reference directory is left up to
+    /// the called function.
     Call(Box<dyn Fn(&Path, Vec<OsString>) -> anyhow::Result<()>>)
     // n.b. Would prefer this to be an FnOnce, but that breaks move semantics
     // when trying to call it while it's a part of an enclosing Enum.
@@ -498,11 +504,12 @@ impl SubProcOperation {
     fn run_cmd(&self, cwd: &Path, outfile : SubProcFile, args : Vec<OsString>)
                -> anyhow::Result<SubProcFile>
     {
+        let fromdir = self.in_dir.clone().unwrap_or(cwd.to_path_buf());
         match &self.cmd {
             Operation::Execute(cmd) => {
                 match process::Command::new(&cmd)
                 .args(&args)
-                .current_dir(self.in_dir.as_ref().unwrap_or(&cwd.to_path_buf()))
+                .current_dir(&fromdir)
                 .stdout(process::Stdio::piped())
                 .stderr(process::Stdio::piped())
                 .spawn()
@@ -514,7 +521,7 @@ impl SubProcOperation {
                             SubProcError::ErrorRunningCmd(
                                 String::from(&self.cmd), args,
                                 out.status.code(),
-                                cwd.to_path_buf(),
+                                fromdir.to_path_buf(),
                                 String::from_utf8_lossy(&out.stderr).into_owned())))
                     }
                 }
@@ -522,12 +529,12 @@ impl SubProcOperation {
                     return Err(anyhow::Error::new(
                         SubProcError::ErrorCmdSetup(String::from(&self.cmd),
                                                     args, e,
-                                                    cwd.to_path_buf())))
+                                                    fromdir.to_path_buf())))
                 }
             }
             }
             Operation::Call(func) => {
-                func(cwd, args)?
+                func(&fromdir, args)?
             }
         }
         Ok(outfile)
