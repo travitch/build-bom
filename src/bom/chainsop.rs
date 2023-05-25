@@ -106,22 +106,22 @@ impl NamedFile {
     /// the specified suffix.  If no particular suffix is needed, a blank suffix
     /// value should be specified.
     pub fn temp<T>(suffix: T) -> NamedFile
-    where String: From<T>
+    where T: Into<String>
     {
-        NamedFile::Temp(String::from(suffix))
+        NamedFile::Temp(suffix.into())
     }
 
     /// Generates a reference to an actual file
     pub fn actual<T>(fpath: T) -> NamedFile
-    where PathBuf: From<T>
+    where T: Into<PathBuf>
     {
-        NamedFile::Actual(PathBuf::from(fpath))
+        NamedFile::Actual(fpath.into())
     }
 
     pub fn glob_in<T,U>(dpath: T, glob: U) -> NamedFile
-    where PathBuf: From<T>, String: From<U>
+    where T: Into<PathBuf>, U: Into<String>
     {
-        NamedFile::GlobIn(PathBuf::from(dpath), String::from(glob))
+        NamedFile::GlobIn(dpath.into(), glob.into())
     }
 }
 
@@ -385,10 +385,10 @@ impl SubProcOperation {
                       inp_file : &FileSpec,
                       out_file : &FileSpec)
                       -> SubProcOperation
-    where OsString: From<&'a T>
+    where T: Into<OsString>, T: AsRef<std::ffi::OsStr>
     {
         SubProcOperation {
-            cmd : Operation::Execute(OsString::from(cmd)),
+            cmd : Operation::Execute(cmd.into()),
             args : Vec::new(),
             inp_file : inp_file.clone(),
             out_file : out_file.clone(),
@@ -425,9 +425,9 @@ impl SubProcOperation {
     /// Adds a command-line argument to use when executing the command.
     #[inline]
     pub fn push_arg<T>(&mut self, arg: T) -> &SubProcOperation
-    where OsString: From<T>
+    where T: Into<OsString>
     {
-        self.args.push(OsString::from(arg));
+        self.args.push(arg.into());
         self
     }
 
@@ -797,10 +797,10 @@ impl ChainedSubOps
     /// ChainedOpRef::set_dir() function has been called for this operation,
     /// which overrides the default directory passed to this command.
     pub fn execute<T>(&self, cwd: &Option<T>) -> anyhow::Result<usize>
-    where PathBuf: From<T>, T: Clone
+    where T: Into<PathBuf>, T: Clone
     {
         let curdir = match &cwd {
-            Some(p) => PathBuf::from(p.clone()),
+            Some(p) => p.clone().into(),
             None => current_dir()?
         };
         let chops = self.chops.borrow();
@@ -852,11 +852,11 @@ impl ChainedOpRef {
     /// Add an argument to this operation in the chain
     #[inline]
     pub fn push_arg<T>(&self, arg: T) -> &ChainedOpRef
-    where OsString: From<T>
+    where T: Into<OsString>
     {
         {
             let mut ops: RefMut<_> = self.chop.borrow_mut();
-            ops.chain[self.opidx].args.push(OsString::from(arg));
+            ops.chain[self.opidx].args.push(arg.into());
         }
         self
     }
