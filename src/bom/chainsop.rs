@@ -276,21 +276,20 @@ impl FileSpec {
     // appropriate manner to insert the file reference.
     fn setup_file_override(&self,
                            ovrf: &PathBuf,
-                           mut args: Vec<OsString>)
-                           -> Vec<OsString>
+                           args: &mut Vec<OsString>)
+                           -> ()
     {
         match &self {
-            FileSpec::Unneeded => args,
-            FileSpec::Append(_) => { args.push(ovrf.into()); args },
+            FileSpec::Unneeded => (),
+            FileSpec::Append(_) => args.push(ovrf.into()),
             FileSpec::Option(flg, _) => {
                 args.push(OsString::from(flg));
-                args.push(ovrf.into());
-                args
+                args.push(ovrf.into())
             },
             FileSpec::Replace(pat, _) =>
-                args.into_iter()
-                .map(|arg| replace(pat, &ovrf.into(), &arg))
-                .collect()
+                for arg in args {
+                    *arg = replace(pat, &ovrf.into(), &arg);
+                }
         }
     }
 }
@@ -578,7 +577,7 @@ impl SubProcOperation {
                                                    String::from("output")))))?;
         }
         for inpf in inps {
-            args = self.inp_file.setup_file_override(inpf, args);
+            self.inp_file.setup_file_override(inpf, &mut args);
         }
         if !self.emit_output_file_first() {
             outfile = self.out_file.setup_file(
@@ -604,7 +603,7 @@ impl SubProcOperation {
                 let mut args = self.args.clone();
                 let outfile = SubProcFile::StaticOutputFile(outf.clone());
                 if self.emit_output_file_first() {
-                    args = self.out_file.setup_file_override(outf, args);
+                    self.out_file.setup_file_override(outf, &mut args);
                 }
                 if inps.len() == 0 {
                     self.inp_file.setup_file(
@@ -614,11 +613,11 @@ impl SubProcOperation {
                                                            String::from("input")))))?;
                 } else {
                     for inpf in inps {
-                        args = self.inp_file.setup_file_override(inpf, args);
+                        self.inp_file.setup_file_override(inpf, &mut args);
                     }
                 }
                 if !self.emit_output_file_first() {
-                    args = self.out_file.setup_file_override(outf, args);
+                    self.out_file.setup_file_override(outf, &mut args);
                 }
                 self.run_cmd(cwd, outfile, args)
             }
