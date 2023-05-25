@@ -316,10 +316,16 @@ enum Operation {
     /// Name of executable to invoke in subprocess
     Execute(OsString),
 
-    /// Local function to call instead of executing a subprocess.  The first
-    /// argument is the reference directory , the second is the argument vector
-    /// (the input and output files will be part of the argument vector as
-    /// determined by their corresponding FileSpec).
+    /// Local function to call instead of executing a subprocess.  This is useful
+    /// for when local processing should be executed at this point in the chain.
+    /// Avoids the need to create multiple chains around this functionality.  For
+    /// example, a chain of operations that midway through creates a tar file
+    /// could Execute("tar") or it could Call a function that uses the rust
+    /// `tar::Builder` to generate the tar file via rust functionality.
+    ///
+    /// The first argument is the reference directory , the second is the
+    /// argument vector (the input and output files will be part of the argument
+    /// vector as determined by their corresponding FileSpec).
     ///
     /// The reference directory would be the current directory for the
     /// command had it been execute as a sub-process (via Operation::Execute).
