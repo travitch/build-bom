@@ -242,17 +242,15 @@ impl FileSpec {
                     NamedFile::Temp(sfx) => {
                         let tf = tempfile::Builder::new().suffix(sfx).tempfile()?;
                         let tfs = OsString::from(tf.path());
-                        *args =
-                            args.into_iter()
-                            .map(|arg| replace(needle, &tfs, arg))
-                            .collect();
+                        for arg in args {
+                            *arg = replace(needle, &tfs, arg)
+                        }
                         Ok(SubProcFile::TempOutputFile(tf))
                     }
                     NamedFile::Actual(fpath) => {
-                        *args =
-                            args.into_iter()
-                            .map(|arg| replace(needle, &fpath.into(), arg))
-                            .collect();
+                        for arg in args {
+                            *arg = replace(needle, &fpath.into(), arg);
+                        }
                         Ok(SubProcFile::StaticOutputFile(fpath.clone()))
                     }
                     NamedFile::GlobIn(dpath, glob) => {
@@ -263,10 +261,9 @@ impl FileSpec {
                                     .map(|x| x.to_str().unwrap())
                                     .collect::<Vec<_>>()
                                     .join(",");
-                                *args =
-                                    args.into_iter()
-                                    .map(|arg| replace(needle, &allfiles.clone().into(), arg))
-                                    .collect();
+                                for arg in &mut *args {
+                                    *arg = replace(needle, &allfiles.clone().into(), arg);
+                                }
                                 Ok(SubProcFile::NoOutputFile)
                             })
                     }
