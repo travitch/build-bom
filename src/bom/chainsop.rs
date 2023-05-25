@@ -344,7 +344,7 @@ impl From<&Operation> for String {
     fn from(op: &Operation) -> Self {
         match op {
             Operation::Execute(cmd) =>
-                cmd.clone().into_string().unwrap_or(String::from("<command>")),
+                cmd.clone().into_string().unwrap_or_else(|_| String::from("<command>")),
             Operation::Call(_) => String::from("local-function")
         }
     }
@@ -518,7 +518,7 @@ impl SubProcOperation {
     fn run_cmd(&self, cwd: &Path, outfile : SubProcFile, args : Vec<OsString>)
                -> anyhow::Result<SubProcFile>
     {
-        let fromdir = self.in_dir.clone().unwrap_or(cwd.to_path_buf());
+        let fromdir = self.in_dir.clone().unwrap_or_else(|| cwd.to_path_buf());
         match &self.cmd {
             Operation::Execute(cmd) => {
                 match process::Command::new(&cmd)
