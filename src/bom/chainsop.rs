@@ -159,6 +159,20 @@ pub enum FileSpec {
 
 }
 
+
+fn with_globbed_matches<Do>(in_dir: &PathBuf, for_glob: &String, mut do_with: Do)
+                            -> anyhow::Result<SubProcFile>
+where Do: FnMut(&Vec<PathBuf>) -> anyhow::Result<SubProcFile>
+{
+    let mut globpat = String::new();
+    globpat.push_str(&OsString::from(in_dir).into_string().unwrap());
+    globpat.push_str("/");
+    globpat.push_str(for_glob);
+    let glob_files = glob::glob(&globpat)?.filter_map(Result::ok).collect();
+    do_with(&glob_files)
+}
+
+
 impl FileSpec {
 
     // Internal function to resolve a FileSpec and insert the actual named file
@@ -171,64 +185,60 @@ impl FileSpec {
     where E: Fn() -> anyhow::Result<SubProcFile>
     {
         match &self {
-            FileSpec::Unneeded => (),
+            FileSpec::Unneeded => Ok(SubProcFile::NoOutputFile),
             FileSpec::Append(nf) =>
                 match nf {
-                    NamedFile::TBD => return on_missing(),
+                    NamedFile::TBD => on_missing(),
                     NamedFile::Temp(sfx) => {
                         let tf = tempfile::Builder::new().suffix(sfx).tempfile()?;
                         args.push(OsString::from(tf.path()));
-                        return Ok(SubProcFile::TempOutputFile(tf))
+                        Ok(SubProcFile::TempOutputFile(tf))
                     }
                     NamedFile::Actual(fpath) => {
                         args.push(fpath.into());
-                        return Ok(SubProcFile::StaticOutputFile(fpath.clone()));
+                        Ok(SubProcFile::StaticOutputFile(fpath.clone()))
                     }
                     NamedFile::GlobIn(dpath, glob) => {
-                        let mut bc_glob = String::new();
-                        bc_glob.push_str(&OsString::from(dpath).into_string().unwrap());
-                        bc_glob.push_str("/");
-                        bc_glob.push_str(glob);
-                        let bc_files = glob::glob(&bc_glob)?;
-                        for bc_entry in bc_files {
-                            let bc_file = bc_entry?;
-                            args.push(OsString::from(bc_file));
-                        }
+                        with_globbed_matches(
+                            dpath, glob,
+                            |files| {
+                                for each in files {
+                                    args.push(OsString::from(each));
+                                };
+                                Ok(SubProcFile::NoOutputFile)
+                            })
                     }
                 }
             FileSpec::Option(optflag, nf) =>
                 match nf {
-                    NamedFile::TBD => return on_missing(),
+                    NamedFile::TBD => on_missing(),
                     NamedFile::Temp(sfx) => {
                         let tf = tempfile::Builder::new().suffix(sfx).tempfile()?;
                         args.push(OsString::from(optflag));
                         args.push(OsString::from(tf.path()));
-                        return Ok(SubProcFile::TempOutputFile(tf))
+                        Ok(SubProcFile::TempOutputFile(tf))
                     }
                     NamedFile::Actual(fpath) => {
                         args.push(OsString::from(optflag));
                         args.push(fpath.into());
-                        return Ok(SubProcFile::StaticOutputFile(fpath.clone()));
+                        Ok(SubProcFile::StaticOutputFile(fpath.clone()))
                     }
                     NamedFile::GlobIn(dpath, glob) => {
-                        let mut bc_glob = String::new();
-                        bc_glob.push_str(&OsString::from(dpath).into_string().unwrap());
-                        bc_glob.push_str("/");
-                        bc_glob.push_str(glob);
-                        let bc_files : Vec<PathBuf> = glob::glob(&bc_glob)?
-                            .filter_map(Result::ok)
-                            .collect();
-                        let bc_files_str = bc_files.iter()
-                            .map(|x| OsString::from(x).into_string().unwrap())
-                            .collect::<Vec<String>>() ;
-                        args.push(OsString::from(optflag));
-                        args.push(OsString::from(bc_files_str.join(",")));
-                        return Ok(SubProcFile::StaticOutputFiles(bc_files));
+                        with_globbed_matches(
+                            dpath, glob,
+                            |files| {
+                                let files_str = files.iter()
+                                    .map(|x| x.to_str().unwrap())
+                                    .collect::<Vec<_>>();
+                                args.push(OsString::from(optflag));
+                                args.push(OsString::from(files_str.join(",")));
+                                Ok(SubProcFile::StaticOutputFiles(files.clone()))
+                            })
                     }
                 }
             FileSpec::Replace(needle, nf) =>
                 match nf {
-                    NamedFile::TBD => return on_missing(),
+                    NamedFile::TBD => on_missing(),
                     NamedFile::Temp(sfx) => {
                         let tf = tempfile::Builder::new().suffix(sfx).tempfile()?;
                         let tfs = OsString::from(tf.path());
@@ -236,34 +246,32 @@ impl FileSpec {
                             args.into_iter()
                             .map(|arg| replace(needle, &tfs, arg))
                             .collect();
-                        return Ok(SubProcFile::TempOutputFile(tf))
+                        Ok(SubProcFile::TempOutputFile(tf))
                     }
                     NamedFile::Actual(fpath) => {
                         *args =
                             args.into_iter()
                             .map(|arg| replace(needle, &fpath.into(), arg))
                             .collect();
-                        return Ok(SubProcFile::StaticOutputFile(fpath.clone()));
+                        Ok(SubProcFile::StaticOutputFile(fpath.clone()))
                     }
                     NamedFile::GlobIn(dpath, glob) => {
-                        let mut bc_glob = String::new();
-                        bc_glob.push_str(&OsString::from(dpath).into_string().unwrap());
-                        bc_glob.push_str("/");
-                        bc_glob.push_str(glob);
-                        let bc_files = glob::glob(&bc_glob)?
-                            .filter_map(Result::ok)
-                            .map(|x| OsString::from(x).into_string().unwrap())
-                            .collect::<Vec<String>>()
-                            .join(",")
-                            ;
-                        *args =
-                            args.into_iter()
-                            .map(|arg| replace(needle, &bc_files.clone().into(), arg))
-                            .collect();
+                        with_globbed_matches(
+                            dpath, glob,
+                            |files| {
+                                let allfiles = files.iter()
+                                    .map(|x| x.to_str().unwrap())
+                                    .collect::<Vec<_>>()
+                                    .join(",");
+                                *args =
+                                    args.into_iter()
+                                    .map(|arg| replace(needle, &allfiles.clone().into(), arg))
+                                    .collect();
+                                Ok(SubProcFile::NoOutputFile)
+                            })
                     }
                 }
         }
-        Ok(SubProcFile::NoOutputFile)
     }
 
     // Alternative to the setup_file function which instead uses the specified
