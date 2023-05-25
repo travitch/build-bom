@@ -465,6 +465,13 @@ impl SubProcOperation {
     /// input and output files will be determined and added to the command-line
     /// as indicated by their FileSpec values.  The successful result specifies
     /// the output file written (if any).
+    ///
+    /// The specified directory in which to execute the command is specified by
+    /// the input cwd parameter; if the directory for this SubProcOperation has
+    /// been explicitly overridden by calls to SubProcOperation::set_dir() (or
+    /// ChainedOpRef::set_dir()) then those take priority and this input cwd is
+    /// ignored.  This is useful for setting a default directory, but allowing a
+    /// particular operation to explicitly override the directory.
     pub fn execute(&self, cwd: &Path) -> anyhow::Result<SubProcFile>
     {
         let mut args = self.args.clone();
@@ -520,7 +527,9 @@ impl SubProcOperation {
         }
     }
 
-    // After the files are setup, this performs the actual run
+    // After the files are setup, this performs the actual run.  See the
+    // documentation for execute() above for a description of the handling of the
+    // cwd parameter.
     fn run_cmd(&self, cwd: &Path, outfile : SubProcFile, args : Vec<OsString>)
                -> anyhow::Result<SubProcFile>
     {
@@ -781,6 +790,12 @@ impl ChainedSubOps
     /// Executes all the enabled operations in this chain sequentially, updating
     /// the input file of each operation to be the output file from the previous
     /// operation.  On success, returns the number of operations executed.
+    ///
+    /// The directory parameter specifies the default directory from which the
+    /// chained operations will be performed.  Each chained operation might
+    /// operate from a separate directory if the SubProcOperation::set_dir() or
+    /// ChainedOpRef::set_dir() function has been called for this operation,
+    /// which overrides the default directory passed to this command.
     pub fn execute<T>(&self, cwd: &Option<T>) -> anyhow::Result<usize>
     where PathBuf: From<T>, T: Clone
     {
