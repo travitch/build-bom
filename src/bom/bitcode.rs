@@ -291,10 +291,9 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
             }
         }
 
-        // If the argument specifies the output file, we need to munge the name
-        // of the output file (which is either the remainder of this argument or
-        // the next argument) to have an appropriate extension and to put it in
-        // the requested bitcode directory (if any)
+        // If the argument specifies the output file, note that here.  If no
+        // argument explicitly specifies an output file then it will need to be
+        // inferred (later below) from the input files.
         if arg.to_str().unwrap().starts_with("-o") {
             if arg == "-o" {
                 match it.next() {
