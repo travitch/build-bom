@@ -1102,8 +1102,6 @@ mod tests {
         let record_exec = move |cwd : &Path, args| Ok(
                     erec.borrow_mut().push(Called(cwd.to_path_buf(), args)));
 
-        // exec.borrow_mut().push(Called("nowhere".into(), (&[]).to_vec()));
-
         let rslt = {
             let op1 = ops.push_op(SubProcOperation::calling(record_exec.clone()));
             op1.set_input(&FileSpec::Unneeded);
@@ -1130,7 +1128,6 @@ mod tests {
             // creating a tempdir with specific files populating that tempdir...
             op4.set_input(&FileSpec::Append(NamedFile::glob_in(".", "LICENSE-*")));
             op4.set_output(&FileSpec::Unneeded);
-            // op4.set_output(&FileSpec::Append(NamedFile::temp(".glob-out")));
             op4.push_arg("--opnum=4");
 
             let op5 = ops.push_op(SubProcOperation::calling(record_exec.clone()));
