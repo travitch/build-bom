@@ -267,25 +267,23 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
 
     // Next, copy over all of the flags we want to keep
     let mut it = orig_args.iter();
-    let mut skip_next = false;
     while let Some(arg) = it.next() {
-        // Skip value argument to a previous blacklisted argument
-        if skip_next {
-            skip_next = false;
-            continue;
-        }
 
         // Skip any arguments explicitly blacklisted
         if clang_support::is_blacklisted_clang_argument(bc_opts.strict, arg) {
-            skip_next = clang_support::next_arg_is_option_value(arg);
+            if clang_support::next_arg_is_option_value(arg) {
+                it.next();  // skip next argument
+            }
             continue;
         }
 
         if arg.to_str().map_or(false, |s| bc_opts.remove_arguments.is_match(s)) {
-            // Reject arguments matching any of the user-provided regexes.  Note
-            // that this is of course as unsafe as users make it.  In
-            // particular, rejecting '-o' would be very bad.
-            skip_next = clang_support::next_arg_is_option_value(arg);  // hopeful here...
+            // Reject argument because it matches one of the user-provided
+            // regexes.  Note that this is of course as unsafe as users make it.
+            // In particular, rejecting '-o' would be very bad.
+            if clang_support::next_arg_is_option_value(arg) {
+                it.next();
+            }
             continue;
         } else {
             if ! arg.to_str().unwrap().starts_with("-o") {
