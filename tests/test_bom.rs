@@ -32,14 +32,14 @@ fn fetch_if_needed(url : &str, filename : &str) -> anyhow::Result<PathBuf> {
 //
 // If the user did not provide one, just return None, which is interpreted by build-bom as 'clang'
 fn user_clang_cmd() -> Option<PathBuf> {
-    std::env::var("CLANG").map(|s| { let mut p = std::path::PathBuf::new(); p.push(s); p }).ok()
+    std::env::var("CLANG").ok().map(PathBuf::from)
 }
 
 // Get the user-provided llvm-link command (via the LLVM_LINK environment variable), if any
 //
 // If the user did not provide one, return None, which build-bom interprets as 'llvm-link'
-fn user_llvm_link_cmd() -> Option<String> {
-    std::env::var("LLVM_LINK").ok()
+fn user_llvm_link_cmd() -> Option<PathBuf> {
+    std::env::var("LLVM_LINK").ok().map(PathBuf::from)
 }
 
 fn gen_bitcode(gen_opts : BitcodeOptions) -> anyhow::Result<()> {
@@ -192,6 +192,7 @@ fn test_zlib() -> anyhow::Result<()> {
 
     let cmd_opts = vec![String::from("make")];
     let gen_opts = BitcodeOptions { clang_path: user_clang_cmd(),
+                                    objcopy_path: None,
                                     suppress_automatic_debug: false,
                                     inject_arguments: Vec::new(),
                                     remove_arguments: Vec::new(),
@@ -211,6 +212,7 @@ fn test_zlib() -> anyhow::Result<()> {
     let extract_opts = ExtractOptions { input: so_path,
                                         output: bc_path,
                                         llvm_link_path: user_llvm_link_cmd(),
+                                        objcopy_path: None,
                                         verbose: true };
     extract_bitcode(extract_opts)?;
     assert!(bc_path2.exists());
@@ -242,6 +244,7 @@ fn test_no_compile_only() -> anyhow::Result<()> {
     eprintln!("## build-bom generate bitcode via make and clang at {:?}", user_clang_cmd());
     let cmd_opts = vec![String::from("make")];
     let gen_opts = BitcodeOptions { clang_path: user_clang_cmd(),
+                                    objcopy_path: None,
                                     suppress_automatic_debug: false,
                                     inject_arguments: Vec::new(),
                                     remove_arguments: Vec::new(),
@@ -262,6 +265,7 @@ fn test_no_compile_only() -> anyhow::Result<()> {
     let extract_opts = ExtractOptions { input: exe_path,
                                         output: bc_path,
                                         llvm_link_path: user_llvm_link_cmd(),
+                                        objcopy_path: None,
                                         verbose: true };
     extract_bitcode(extract_opts)?;
     eprintln!("## bitcode extracted");
@@ -296,6 +300,7 @@ fn test_blddir() -> anyhow::Result<()> {
     eprintln!("## build-bom generate bitcode via make and clang at {:?}", user_clang_cmd());
     let cmd_opts = vec![String::from("make")];
     let gen_opts = BitcodeOptions { clang_path: user_clang_cmd(),
+                                    objcopy_path: None,
                                     suppress_automatic_debug: false,
                                     inject_arguments: Vec::new(),
                                     remove_arguments: Vec::new(),
@@ -319,6 +324,7 @@ fn test_blddir() -> anyhow::Result<()> {
     let extract_opts = ExtractOptions { input: exe_path,
                                         output: bc_path,
                                         llvm_link_path: user_llvm_link_cmd(),
+                                        objcopy_path: None,
                                         verbose: true };
     extract_bitcode(extract_opts)?;
     eprintln!("## bitcode extracted");

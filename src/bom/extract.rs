@@ -1,7 +1,7 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-use crate::bom::options::ExtractOptions;
+use crate::bom::options::{ExtractOptions, path_def};
 use crate::bom::bitcode::ELF_SECTION_NAME;
 use crate::bom::chainsop::{ChainedSubOps, FileSpec, NamedFile, SubProcOperation};
 
@@ -46,9 +46,10 @@ pub fn extract_bitcode_entrypoint(extract_options : &ExtractOptions) -> anyhow::
         // Thus the more robust solution is to specify the (ignored) output file
         // in the standard temporary directory so that objcopy-created files next
         // to it are in a valid temporary location.
+        let objcopy_cmd = path_def(&extract_options.objcopy_path, "objcopy");
         let objcopy = extract_ops.push_op(
             SubProcOperation::new(
-                &"objcopy",
+                &objcopy_cmd,
                 &FileSpec::Append(NamedFile::actual(&extract_options.input)),
                 &FileSpec::Append(NamedFile::temp(".o"))));
         objcopy.push_arg("--dump-section");
@@ -82,9 +83,7 @@ pub fn extract_bitcode_entrypoint(extract_options : &ExtractOptions) -> anyhow::
         // Now all the files contained in the extracted bitcode.tar should be
         // linked together to create the final bitcode file.
 
-        let llvm_link = OsString::from(extract_options.llvm_link_path
-                                       .as_ref()
-                                       .unwrap_or(&String::from("llvm-link")));
+        let llvm_link = path_def(&extract_options.llvm_link_path, "llvm-link");
         extract_ops.push_op(
             SubProcOperation::new(
                 &llvm_link,

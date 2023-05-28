@@ -3,6 +3,7 @@ use structopt::StructOpt;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::string::ToString;
+use std::ffi::OsString;
 
 #[derive(Debug,StructOpt)]
 #[structopt(version = "1.0", author = "Tristan Ravitch")]
@@ -26,7 +27,9 @@ pub struct ExtractOptions {
     #[structopt(short="o", long="output", help="The file to save the resulting bitcode file to")]
     pub output : PathBuf,
     #[structopt(long="llvm-link-path", help="The path to the llvm-link tool (possibly version suffixed)")]
-    pub llvm_link_path : Option<String>,
+    pub llvm_link_path : Option<PathBuf>,
+    #[structopt(long="objcopy", help="Name of the objcopy binary to use to when generating bitcode (default: `objcopy`)")]
+    pub objcopy_path : Option<PathBuf>,
     #[structopt(short="v", long="verbose", help="Generate verbose output")]
     pub verbose : bool,
 }
@@ -35,6 +38,8 @@ pub struct ExtractOptions {
 pub struct BitcodeOptions {
     #[structopt(long="clang", help="Name of the clang binary to use to generate bitcode (default: `clang`)")]
     pub clang_path : Option<PathBuf>,
+    #[structopt(long="objcopy", help="Name of the objcopy binary to use to when generating bitcode (default: `objcopy`)")]
+    pub objcopy_path : Option<PathBuf>,
     #[structopt(short="v", long="verbose", help="Generate verbose output")]
     pub verbose : bool,
     #[structopt(long="suppress-automatic-debug", help="Prevent `build-bom` from automatically injecting flags to generate debug information in bitcode files")]
@@ -165,4 +170,9 @@ pub enum StringNormalizeStrategy {
 
 impl Default for StringNormalizeStrategy {
     fn default () -> Self { StringNormalizeStrategy ::Strict }
+}
+
+pub fn path_def(p: &Option<PathBuf>, d: &str) -> OsString
+{
+    p.as_ref().map(OsString::from).unwrap_or(d.into())
 }
