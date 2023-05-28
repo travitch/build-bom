@@ -26,7 +26,9 @@ pub struct ExtractOptions {
     #[structopt(short="o", long="output", help="The file to save the resulting bitcode file to")]
     pub output : PathBuf,
     #[structopt(long="llvm-link-path", help="The path to the llvm-link tool (possibly version suffixed)")]
-    pub llvm_link_path : Option<String>
+    pub llvm_link_path : Option<String>,
+    #[structopt(short="v", long="verbose", help="Generate verbose output")]
+    pub verbose : bool,
 }
 
 #[derive(Debug,StructOpt)]

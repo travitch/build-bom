@@ -118,7 +118,9 @@ struct BCOpts<'a> {
     remove_arguments : &'a RegexSet,
     /// Strict: maintain strict adherence between the bitcode and the target code
     /// (optimization, target architecture, etc.)
-    strict : bool
+    strict : bool,
+    /// If true, echo executed commands to stdout
+    echo_verbose : bool,
 }
 
 pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i32> {
@@ -166,7 +168,8 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
                            suppress_automatic_debug : bitcode_options.suppress_automatic_debug,
                            inject_arguments : &bitcode_options.inject_arguments,
                            remove_arguments : &remove_rx,
-                           strict : bitcode_options.strict
+                           strict : bitcode_options.strict,
+                           echo_verbose : bitcode_options.verbose,
     };
     let ptracer1 = generate_bitcode(&mut sender, ptracer, &bc_opts)?;
 
@@ -368,7 +371,8 @@ fn build_bitcode_compile_only(chan : &mut mpsc::Sender<Option<Event>>,
                 let _res = chan.send(Some(Event::BitcodeGenerationAttempts));
                 let bctarget = bc_args.resolved_object_target.clone();
                 attach_bitcode(cwd, &mut bc_args, &bctarget)?;
-                let ops_result = bc_args.ops.execute(&Some(cwd), false);
+                let ops_result = bc_args.ops.execute(&Some(cwd),
+                                                     bc_opts.echo_verbose);
                 match ops_result {
                     Err(e) => {
                         let _ = // Ignore chan.send errors
@@ -1112,7 +1116,8 @@ mod tests {
                                   [r"^-remove$", r"^--this" ],
 
                               ).unwrap(),
-                              strict: false };
+                              strict: false,
+                              echo_verbose: true };
 
         // Simple cmdline specification
         let args = [ "-g", "-O1", "-o", "foo.obj",
