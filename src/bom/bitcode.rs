@@ -368,7 +368,7 @@ fn build_bitcode_compile_only(chan : &mut mpsc::Sender<Option<Event>>,
                 let _res = chan.send(Some(Event::BitcodeGenerationAttempts));
                 let bctarget = bc_args.resolved_object_target.clone();
                 attach_bitcode(cwd, &mut bc_args, &bctarget)?;
-                let ops_result = bc_args.ops.execute(&Some(cwd));
+                let ops_result = bc_args.ops.execute(&Some(cwd), false);
                 match ops_result {
                     Err(e) => {
                         let _ = // Ignore chan.send errors

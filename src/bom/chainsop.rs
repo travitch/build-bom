@@ -472,11 +472,11 @@ impl SubProcOperation {
     /// ChainedOpRef::set_dir()) then those take priority and this input cwd is
     /// ignored.  This is useful for setting a default directory, but allowing a
     /// particular operation to explicitly override the directory.
-    pub fn execute(&self, cwd: &Path) -> anyhow::Result<SubProcFile>
+    pub fn execute(&self, cwd: &Path, echo : bool) -> anyhow::Result<SubProcFile>
     {
         let mut args = self.args.clone();
         let outfile = self.cmd_file_setup(&mut args)?;
-        self.run_cmd(cwd, outfile, args)
+        self.run_cmd(cwd, outfile, args, echo)
     }
 
     // Sets up file references for running a command
@@ -529,13 +529,24 @@ impl SubProcOperation {
 
     // After the files are setup, this performs the actual run.  See the
     // documentation for execute() above for a description of the handling of the
-    // cwd parameter.
-    fn run_cmd(&self, cwd: &Path, outfile : SubProcFile, args : Vec<OsString>)
+    // cwd parameter.  If echo is true, the command is echoed to stdout just
+    // before execution.
+    fn run_cmd(&self, cwd: &Path,
+               outfile : SubProcFile,
+               args : Vec<OsString>,
+               echo : bool)
                -> anyhow::Result<SubProcFile>
     {
         let fromdir = self.in_dir.clone().unwrap_or_else(|| cwd.to_path_buf());
         match &self.cmd {
             Operation::Execute(cmd) => {
+                if echo {
+                    println!("{:?} {:?} [in {:?}]",
+                             cmd,
+                             args.iter().map(|x| x.to_str().unwrap())
+                             .collect::<Vec<_>>().join(" "),
+                             fromdir);
+                }
                 match process::Command::new(&cmd)
                 .args(&args)
                 .current_dir(&fromdir)
@@ -563,6 +574,12 @@ impl SubProcOperation {
             }
             }
             Operation::Call(func) => {
+                if echo {
+                    println!("Call: {:?} [in {:?}]",
+                             args.iter().map(|x| x.to_str().unwrap())
+                             .collect::<Vec<_>>().join(" "),
+                             fromdir);
+                }
                 func(&fromdir, args)?
             }
         }
@@ -576,10 +593,11 @@ impl SubProcOperation {
     /// function.
     pub fn execute_with_inp_override(&self,
                                      cwd: &Path,
-                                     inps: &Vec<PathBuf>)
+                                     inps: &Vec<PathBuf>,
+                                     echo : bool)
                                      -> anyhow::Result<SubProcFile> {
         if inps.len() == 0 {
-            return self.execute(cwd);
+            return self.execute(cwd, echo);
         }
 
         let mut args = self.args.clone();
@@ -601,7 +619,7 @@ impl SubProcOperation {
                     SubProcError::ErrorMissingFile(String::from(&self.cmd),
                                                    String::from("output")))))?;
         }
-        self.run_cmd(cwd, outfile, args)
+        self.run_cmd(cwd, outfile, args, echo)
     }
 
     // Executes this command in a subprocess in the specified directory,
@@ -610,10 +628,11 @@ impl SubProcOperation {
     pub fn execute_with_file_overrides(&self,
                                        cwd: &Path,
                                        inps: &Vec<PathBuf>,
-                                       out: &Option<PathBuf>)
+                                       out: &Option<PathBuf>,
+                                       echo : bool)
                                        -> anyhow::Result<SubProcFile> {
         match &out {
-            None => self.execute_with_inp_override(cwd, inps),
+            None => self.execute_with_inp_override(cwd, inps, echo),
             Some (outf) => {
                 let mut args = self.args.clone();
                 let outfile = SubProcFile::StaticOutputFile(outf.clone());
@@ -634,7 +653,7 @@ impl SubProcOperation {
                 if !self.emit_output_file_first() {
                     self.out_file.setup_file_override(outf, &mut args);
                 }
-                self.run_cmd(cwd, outfile, args)
+                self.run_cmd(cwd, outfile, args, echo)
             }
         }
     }
@@ -796,7 +815,7 @@ impl ChainedSubOps
     /// operate from a separate directory if the SubProcOperation::set_dir() or
     /// ChainedOpRef::set_dir() function has been called for this operation,
     /// which overrides the default directory passed to this command.
-    pub fn execute<T>(&self, cwd: &Option<T>) -> anyhow::Result<usize>
+    pub fn execute<T>(&self, cwd: &Option<T>, echo : bool) -> anyhow::Result<usize>
     where T: Into<PathBuf>, T: Clone
     {
         let curdir = match &cwd {
@@ -818,7 +837,8 @@ impl ChainedSubOps
                           Some(f) => vec![f.clone()],
                           None => vec![]
                       },
-                      &chops.final_out_file)
+                      &chops.final_out_file,
+                      echo)
     }
 }
 
@@ -826,25 +846,26 @@ fn execute_chain(chops: &Vec<SubProcOperation>,
                  cwd: &Path,
                  mut op_idxs: &mut Vec<usize>,
                  inp_files : &Vec<PathBuf>,  // usually just one, except GlobIn
-                 out_file : &Option<PathBuf>)
+                 out_file : &Option<PathBuf>,
+                 echo : bool)
                  -> anyhow::Result<usize>
 {
     let op_idx = op_idxs.pop().unwrap();
     let spo = &chops[op_idx];
     let last_op = op_idxs.is_empty();
     if last_op {
-        spo.execute_with_file_overrides(cwd, inp_files, out_file)?;
+        spo.execute_with_file_overrides(cwd, inp_files, out_file, echo)?;
         return Ok(1);
     }
 
-    let outfile = spo.execute_with_inp_override(cwd, inp_files)?;
+    let outfile = spo.execute_with_inp_override(cwd, inp_files, echo)?;
     let nxt_inpfile = match &outfile {
         SubProcFile::NoOutputFile => vec![],
         SubProcFile::StaticOutputFile(f) => vec![f.clone()],
         SubProcFile::TempOutputFile(tf) => vec![tf.path().to_path_buf()],
         SubProcFile::StaticOutputFiles(fs) => fs.clone(),
     };
-    let nxt = execute_chain(chops, cwd, &mut op_idxs, &nxt_inpfile, &out_file)?;
+    let nxt = execute_chain(chops, cwd, &mut op_idxs, &nxt_inpfile, &out_file, echo)?;
     Ok(nxt + 1)
 }
 
@@ -1146,7 +1167,7 @@ mod tests {
 
             op5.enable();
 
-            ops.execute::<String>(&None)
+            ops.execute::<String>(&None, true)
         };
 
         assert_eq!(5, rslt?);

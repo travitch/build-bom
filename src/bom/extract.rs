@@ -95,7 +95,7 @@ pub fn extract_bitcode_entrypoint(extract_options : &ExtractOptions) -> anyhow::
         bc_glob.push_str(&OsString::from(tmp_dir.path()).into_string().unwrap());
         bc_glob.push_str("/*.bc");
 
-        extract_ops.execute::<String>(&None)?;
+        extract_ops.execute::<String>(&None, false)?;
         Ok(0)
     }
 }
