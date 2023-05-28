@@ -1122,6 +1122,7 @@ mod tests {
         // Simple cmdline specification
         let args = [ "-g", "-O1", "-o", "foo.obj",
                        "-march=mips",
+                       "-I", "src/include",
                        "-DDebug",
                        "bar.c" ].map(|s| s.into());
         let bcargs0 = build_bitcode_arguments(&mut sender, &bcopts, &args);
@@ -1145,6 +1146,7 @@ mod tests {
                                          \"-arg2\", \
                                          \"arg2val\", \
                                          \"-g\", \
+                                         \"-I\", \"src/include\", \
                                          \"-DDebug\", \
                                          \"bar.c\"], \
                                   inp_file: Unneeded, \
@@ -1183,6 +1185,7 @@ mod tests {
                                          \"-g\", \
                                          \"-O1\", \
                                          \"-march=mips\", \
+                                         \"-I\", \"src/include\", \
                                          \"-DDebug\", \
                                          \"bar.c\"], \
                                   inp_file: Unneeded, \
@@ -1207,7 +1210,7 @@ mod tests {
                                                    "-O",
                                                    "--this=remove-also",
                                                    "-DDebug",
-                                                   "bar.c"
+                                                   "bar.cc"
                                               ].map(|s| s.into()));
         match bcargs2 {
             Err(e) => assert_eq!(e.to_string(), "<no error expected>"),
@@ -1226,7 +1229,7 @@ mod tests {
                                          \"-arg2\", \
                                          \"arg2val\", \
                                          \"-DDebug\", \
-                                         \"bar.c\"], \
+                                         \"bar.cc\"], \
                                   inp_file: Unneeded, \
                                   out_file: Option(\"-o\", Temp(\".bc\")), \
                                   in_dir: None \
