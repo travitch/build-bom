@@ -1124,8 +1124,8 @@ mod tests {
                        "-march=mips",
                        "-DDebug",
                        "bar.c" ].map(|s| s.into());
-        let bcargs1 = build_bitcode_arguments(&mut sender, &bcopts, &args);
-        match bcargs1 {
+        let bcargs0 = build_bitcode_arguments(&mut sender, &bcopts, &args);
+        match bcargs0 {
             Err(e) => assert_eq!(e.to_string(), "<no error expected>"),
             Ok(a) => {
                 // This isn't a great way to check the contents of a
