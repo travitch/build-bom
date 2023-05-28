@@ -227,6 +227,7 @@ struct BitcodeArguments {
 /// path
 fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
                            bc_opts : &BCOpts,
+                           orig_compiler_cmd: &OsString,
                            orig_args : &[OsString]) -> anyhow::Result<BitcodeArguments> {
     let mut orig_target = None;
     let ops = ChainedSubOps::new();
@@ -268,13 +269,14 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
         gen_bitcode.push_arg(arg);
     }
 
-    // Next, copy over all of the flags we want to keep
+    // Next, copy over all of the flags we want to keep.
     let mut it = orig_args.iter();
     while let Some(arg) = it.next() {
+        let next_is_value = clang_support::next_arg_is_option_value(arg);
 
         // Skip any arguments explicitly blacklisted
         if clang_support::is_blacklisted_clang_argument(bc_opts.strict, arg) {
-            if clang_support::next_arg_is_option_value(arg) {
+            if next_is_value {
                 it.next();  // skip next argument
             }
             continue;
@@ -284,28 +286,36 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
             // Reject argument because it matches one of the user-provided
             // regexes.  Note that this is of course as unsafe as users make it.
             // In particular, rejecting '-o' would be very bad.
-            if clang_support::next_arg_is_option_value(arg) {
+            if next_is_value {
                 it.next();
             }
             continue;
-        } else {
-            if ! arg.to_str().unwrap().starts_with("-o") {
-                gen_bitcode.push_arg(arg);
-            }
         }
 
-        // If the argument specifies the output file, note that here.  If no
-        // argument explicitly specifies an output file then it will need to be
-        // inferred (later below) from the input files.
-        if arg.to_str().unwrap().starts_with("-o") {
+        if ! arg.to_str().unwrap().starts_with("-o") {
+            gen_bitcode.push_arg(arg);
+            if next_is_value {
+                match it.next() {
+                    Some(val) => { gen_bitcode.push_arg(val); }
+                    None => {
+                        return Err(anyhow::Error::new(
+                            BitcodeError::MissingArgValue(
+                                orig_compiler_cmd.into(),
+                                orig_args.to_vec(),
+                                arg.clone())));
+                    }
+                }
+            }
+        } else {
+            // The argument specifies the output file, so note that file here.
+            // If no argument explicitly specifies an output file then it will
+            // need to be inferred (later below) from the input files.
             if arg == "-o" {
                 match it.next() {
                     None => {
                         return Err(anyhow::Error::new(BitcodeError::MissingOutputFile(Path::new(&bc_opts.clang_path).to_path_buf(), Vec::from(orig_args))));
                     }
-                    Some(target) => {
-                        orig_target = Some(PathBuf::from(&target).into_os_string());
-                    }
+                    Some(target) => { orig_target = Some(target.clone()); }
                 }
             } else {
                 let (_,tgt) = arg.to_str().unwrap().split_at(2);
@@ -353,7 +363,8 @@ fn build_bitcode_compile_only(chan : &mut mpsc::Sender<Option<Event>>,
                               orig_compiler_cmd : &OsString,
                               cwd : &Path
 ) -> anyhow::Result<()> {
-    let mut bc_args = build_bitcode_arguments(chan, bc_opts, args)?;
+    let mut bc_args = build_bitcode_arguments(chan, bc_opts,
+                                              orig_compiler_cmd, args)?;
 
     match bc_args.ops.out_file_for_chain() {
 
@@ -458,6 +469,8 @@ pub enum BitcodeError {
     ErrorAttachingBitcode(PathBuf, OsString, OsString, std::io::Error, String),
     #[error("Missing output file in command {0:?} {1:?}")]
     MissingOutputFile(PathBuf, Vec<OsString>),
+    #[error("Expected argument {2:?} value not present in {0:?} {1:?}")]
+    MissingArgValue(PathBuf, Vec<OsString>, OsString),
     #[error("Error generating bitcode with command {0:?} {1:?}")]
     ErrorGeneratingBitcode(PathBuf, Vec<OsString>),
     #[error("Error {2:?} generating bitcode with command {0:?} {1:?}")]
@@ -1125,7 +1138,8 @@ mod tests {
                        "-I", "src/include",
                        "-DDebug",
                        "bar.c" ].map(|s| s.into());
-        let bcargs0 = build_bitcode_arguments(&mut sender, &bcopts, &args);
+        let bcargs0 = build_bitcode_arguments(&mut sender, &bcopts,
+                                              &OsString::from("gcc"), &args);
         match bcargs0 {
             Err(e) => assert_eq!(e.to_string(), "<no error expected>"),
             Ok(a) => {
@@ -1166,7 +1180,8 @@ mod tests {
 
         // Simple cmdline specification, strict bitcode
         let bcopts_strict = BCOpts { strict: true, ..bcopts };
-        let bcargs1 = build_bitcode_arguments(&mut sender, &bcopts_strict, &args);
+        let bcargs1 = build_bitcode_arguments(&mut sender, &bcopts_strict,
+                                              &OsString::from("c"), &args);
         match bcargs1 {
             Err(e) => assert_eq!(e.to_string(), "<no error expected>"),
             Ok(a) => {
@@ -1205,6 +1220,7 @@ mod tests {
 
         // Alternate cmdline specification
         let bcargs2 = build_bitcode_arguments(&mut sender, &bcopts,
+                                              &OsString::from("clang"),
                                               &[ "-ofoo.obj",
                                                    "-remove",
                                                    "-O",
