@@ -477,7 +477,7 @@ pub enum BitcodeError {
 ///
 /// Detailed explanation:
 /// ---------------------
-//
+///
 /// The ccache tool provides a "clang" target in the PATH, which is
 /// actually a symlink to the ccache executable: the ccache executable
 /// will issue a pre-proc only (-E) actual clang operation and compare
@@ -607,7 +607,7 @@ fn attach_bitcode(cwd : &Path,
     // Define the args in the order that matches the args in the calling() above.
     mktar.set_input(&FileSpec::Append(NamedFile::temp("")));
     mktar.set_output(&FileSpec::Append(NamedFile::temp(".tar")));
-    let mut reprname = bc_args.ops.out_file_for_chain().unwrap_or(PathBuf::from("unk.bc"));
+    let mut reprname = bc_args.ops.out_file_for_chain().unwrap_or_else(|| PathBuf::from("unk.bc"));
     reprname.set_extension("bc");
     mktar.push_arg(reprname);
 
