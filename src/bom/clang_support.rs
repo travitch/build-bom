@@ -156,6 +156,12 @@ pub fn is_option_arg(arg : &OsStr) -> bool {
 
 static CLANG_ARGUMENT_BLACKLIST : &'static [&str] =
     &[r"^-fno-tree-loop-im$",
+
+      // Most warnings are disabled because this is a background compilation
+      // operation.  The primary compilation already emitted code warnings (if
+      // directed to), so these would either be a duplicate or be caused by clang
+      // differences or other argument changes made for the clang -emit-llvm
+      // background operation.
       r"^-Wmaybe-uninitialized$",
       r"^-Wno-maybe-uninitialized$",
       r"^-Wframe-address$",
@@ -166,7 +172,6 @@ static CLANG_ARGUMENT_BLACKLIST : &'static [&str] =
       r"^-Wformat-truncation$",
       r"^-Wpacked-not-aligned$",
       r"^-Wno-packed-not-aligned$",
-      r"^-Werror=",
       r"^-Wno-restrict$",
       r"^-Wrestrict$",
       r"^-Wno-unused-but-set-variable$",
@@ -177,6 +182,16 @@ static CLANG_ARGUMENT_BLACKLIST : &'static [&str] =
       r"^-Wstringop-overflow$",
       r"^-Wzero-length-bounds$",
       r"^-Wno-zero-length-bounds$",
+      r"^-Wunsafe-loop-optimizations$",
+
+      // -Werror is removed because, in addition to the above note about
+      // warnings, bitcode generation disables optimization, which frequently
+      // causes the following libc error:
+      //
+      //      warning _FORTIFY_SOURCE requires compiling with optimization (-O)
+      r"^-Werror($|=)",
+
+      // The following are GCC-only and unknown to CLANG
       r"^-fno-allow-store-data-races$",
       r"^-fno-var-tracking-assignments$",
       r"^-fmerge-constants$",
@@ -186,12 +201,17 @@ static CLANG_ARGUMENT_BLACKLIST : &'static [&str] =
       r"^--param=",
       r"^-quiet$",
       r"^-auxbase-strip$", // https://gcc.gnu.org/legacy-ml/gcc-help/2013-08/msg00067.html
+
       // clang sees "-dumpbase ARG" as a "multiple output file mode"
       // and doesn't support the use of -o with it (although gcc does)
       r"^-dumpbase$",
+
+      // Options which override output generation and will conflict with the
+      // -emit-llvm option.
       r"^-fdump-rtl-",
       r"^-M{1,2}D$",
       r"^-d[MDNIU]$",
+
       r"^-Q$",
       ];
 
