@@ -1030,20 +1030,64 @@ fn arg_is_non_generative(arg: &OsString, num_args: &usize) -> bool {
 }
 
 
-/// Returns true if we should make bitcode given this command
-fn should_make_bc(rc : &RunCommand, comp_mods : &CompileModifiers) -> bool {
+/// Returns true if we should make bitcode given this command.  May write to the
+/// event channel on failure.
+fn should_make_bc(rc : &RunCommand, comp_mods : &CompileModifiers,
+                  chan : &mut mpsc::Sender<Option<Event>>
+) -> bool {
     let cmd_path = Path::new(&rc.bin);
     match cmd_path.file_name() {
-        None => { false }
+        None => { false }  // TODO: event for this
         Some(cmd_file_name) => {
-            clang_support::is_compile_command_name(cmd_file_name) && // Is this a compile command we recognize
-                !comp_mods.is_pipe_io &&                             // Pipe input can't be re-processed a second time (so generating bitcode would fail; the pipe is already drained)
-                !comp_mods.is_assemble_only &&                       // In an assemble-only build, there is no object file to attach the bitcode to
-                !comp_mods.is_pre_proc_only &&                       // Similarly, in a preprocess only build we have no object file to attach bitcode to
-                !comp_mods.is_non_generative
+            // n.b. ignore chan.send failures below: shouldn't happen and only
+            // for stats collection anyhow, so don't let it kill this tracer
+            // thread.
+
+            // Is this a compile command we recognize?
+            if !clang_support::is_compile_command_name(cmd_file_name) {
+                return false;  // nope: just ignore it quietly
+            }
+
+            // Pipe input can't be re-processed a second time (so generating
+            // bitcode would fail; the pipe is already drained)
+            if comp_mods.is_pipe_io {
+                let _res = chan.send(Some(Event::PipeInputOrOutput(rc.clone())));
+                return false;
+            }
+
+            // In an assemble-only build, there is no object file to attach the
+            // bitcode to.
+            if comp_mods.is_assemble_only {
+                let _res = chan.send(Some(Event::SkippingAssembleOnlyCommand(rc.clone())));
+                return false;
+            }
+
+            // In a preprocess only build we have no object file to attach
+            // bitcode to.
+            if comp_mods.is_pre_proc_only {
+                // TODO: event for this
+                return false;
+            }
+
+            // This compilation command doesn't generate machine-code output
+            if comp_mods.is_non_generative {
+                // TODO: event for this
+                return false;
+            }
+
+            // This compilation command uses a response file: cannot be reliably
+            // read twice since only a file-descriptor is provided and it might
+            // not be seekable.
+            if comp_mods.is_response_file {
+                let _res = chan.send(Some(Event::ResponseFile(rc.clone())));
+                return false;
+            }
+
+            true
         }
     }
 }
+
 
 /// Determine what actions should be taken on the successful execution
 /// completion of a build process action.
@@ -1052,7 +1096,7 @@ fn post_process_actions(rc : RunCommand,
                         bc_opts : &BCOpts
 ) {
     let comp_mods = extract_compile_modifiers(&rc);
-    if should_make_bc(&rc, &comp_mods) {
+    if should_make_bc(&rc, &comp_mods, chan) {
         // If this is a command we can build bitcode for, do
         // it.  We wait until the exec'd process exits
         // because we need the original object file to exist
@@ -1064,25 +1108,6 @@ fn post_process_actions(rc : RunCommand,
         match build_bitcode_compile_only(chan, bc_opts, rest_args, &rc.cwd) {
             Err(err) => { println!("Error building bitcode: {:?}", err) }
             Ok(_) => {}
-        }
-    } else {
-        // Bump a summary stat indicating a reason why this compile could not
-        // attempt to generate bitcode.  Ignore situations where there wouldn't
-        // have been any object code generated anyhow (e.g. pre-processor-only,
-        // etc.).
-        if !comp_mods.is_pre_proc_only {
-            if comp_mods.is_pipe_io {
-                // Ignore send failures... that really shouldn't happen and
-                // we don't want to kill the tracer thread.
-                let _res = chan.send(Some(Event::PipeInputOrOutput(rc.clone())));
-            }
-            if comp_mods.is_response_file {
-                let _res = chan.send(Some(Event::ResponseFile(rc.clone())));
-            }
-
-            if comp_mods.is_assemble_only {
-                let _res = chan.send(Some(Event::SkippingAssembleOnlyCommand(rc)));
-            }
         }
     }
 }
