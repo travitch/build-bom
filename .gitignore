@@ -1,0 +1,5 @@
+_darcs/
+.boring
+.cmd_history
+*~
+target/
