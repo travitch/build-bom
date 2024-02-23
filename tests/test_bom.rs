@@ -177,15 +177,16 @@ fn test_blacklist() -> anyhow::Result<()> {
 
 #[test]
 fn test_zlib() -> anyhow::Result<()> {
-    let url = "https://www.zlib.net/zlib-1.2.11.tar.gz";
-    let filename = "zlib-1.2.11.tar.gz";
-    let dir_name = "zlib-1.2.11";
+    let url = "https://www.zlib.net/current/zlib.tar.gz";
+    let filename = "zlib.tar.gz";
     let abs_src = fetch_if_needed(url, filename)?;
 
     let tdir = tempdir()?;
     let _push1 = pushd(tdir.path())?;
     let tar = Cmd::new("tar").arg("xf").arg(abs_src);
     tar.run()?;
+    let dir_name = &glob::glob("zlib-*")?.filter_map(Result::ok).collect::<Vec<PathBuf>>()[0];
+    let zlib_version = &dir_name.to_str().unwrap()["zlib-".len()..];
     let _push2 = pushd(dir_name)?;
     let conf = Cmd::new("bash").arg("configure");
     conf.run()?;
@@ -205,9 +206,9 @@ fn test_zlib() -> anyhow::Result<()> {
     gen_bitcode(gen_opts)?;
 
     let mut so_path = std::path::PathBuf::new();
-    so_path.push("libz.so.1.2.11");
+    so_path.push("libz.so.".to_owned() + zlib_version);
     let mut bc_path = std::path::PathBuf::new();
-    bc_path.push("libz.so.1.2.11.bc");
+    bc_path.push("libz.so.".to_owned() + zlib_version + ".bc");
     let bc_path2 = bc_path.clone();
     let extract_opts = ExtractOptions { input: so_path, output: bc_path, llvm_link_path: user_llvm_link_cmd() };
     extract_bitcode(extract_opts)?;
