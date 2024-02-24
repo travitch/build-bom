@@ -206,9 +206,9 @@ fn test_zlib() -> anyhow::Result<()> {
     gen_bitcode(gen_opts)?;
 
     let mut so_path = std::path::PathBuf::new();
-    so_path.push("libz.so.".to_owned() + zlib_version);
+    so_path.push(format!("libz.so.{}", zlib_version));
     let mut bc_path = std::path::PathBuf::new();
-    bc_path.push("libz.so.".to_owned() + zlib_version + ".bc");
+    bc_path.push(format!("libz.so.{}.bc", zlib_version));
     let bc_path2 = bc_path.clone();
     let extract_opts = ExtractOptions { input: so_path, output: bc_path, llvm_link_path: user_llvm_link_cmd() };
     extract_bitcode(extract_opts)?;
