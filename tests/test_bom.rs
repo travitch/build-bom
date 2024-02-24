@@ -197,7 +197,7 @@ fn test_zlib() -> anyhow::Result<()> {
                                     suppress_automatic_debug: false,
                                     inject_arguments: Vec::new(),
                                     remove_arguments: Vec::new(),
-                                    verbose: false,
+                                    verbose: vec![true, true],
                                     strict: false,
                                     command: cmd_opts,
                                     any_fail: false };
@@ -210,7 +210,10 @@ fn test_zlib() -> anyhow::Result<()> {
     let mut bc_path = std::path::PathBuf::new();
     bc_path.push(format!("libz.so.{}.bc", zlib_version));
     let bc_path2 = bc_path.clone();
-    let extract_opts = ExtractOptions { input: so_path, output: bc_path, llvm_link_path: user_llvm_link_cmd() };
+    let extract_opts = ExtractOptions { input: so_path,
+                                        output: bc_path,
+                                        llvm_link_path: user_llvm_link_cmd(),
+                                        verbose: vec![true, true]};
     extract_bitcode(extract_opts)?;
     assert!(bc_path2.exists());
     Ok(())
@@ -245,7 +248,7 @@ fn test_no_compile_only() -> anyhow::Result<()> {
                                     suppress_automatic_debug: false,
                                     inject_arguments: Vec::new(),
                                     remove_arguments: Vec::new(),
-                                    verbose: false,
+                                    verbose: vec![],
                                     strict: false,
                                     command: cmd_opts,
                                     any_fail: true };
@@ -259,7 +262,10 @@ fn test_no_compile_only() -> anyhow::Result<()> {
     let bc_path2 = bc_path.clone();
     eprintln!("## extract bitcode from {:?} to {:?} using llvm-link at {:?}",
               exe_path, bc_path, user_llvm_link_cmd());
-    let extract_opts = ExtractOptions { input: exe_path, output: bc_path, llvm_link_path: user_llvm_link_cmd() };
+    let extract_opts = ExtractOptions { input: exe_path,
+                                        output: bc_path,
+                                        llvm_link_path: user_llvm_link_cmd(),
+                                        verbose: vec![] };
     extract_bitcode(extract_opts)?;
     eprintln!("## bitcode extracted");
     assert!(bc_path2.exists());
@@ -297,7 +303,7 @@ fn test_blddir() -> anyhow::Result<()> {
                                     suppress_automatic_debug: false,
                                     inject_arguments: Vec::new(),
                                     remove_arguments: Vec::new(),
-                                    verbose: true,
+                                    verbose: vec![true],
                                     strict: true,
                                     // preproc_native: true,
                                     command: cmd_opts,
@@ -314,7 +320,10 @@ fn test_blddir() -> anyhow::Result<()> {
     let bc_path2 = bc_path.clone();
     eprintln!("## extract bitcode from {:?} to {:?} using llvm-link at {:?}",
               exe_path, bc_path, user_llvm_link_cmd());
-    let extract_opts = ExtractOptions { input: exe_path, output: bc_path, llvm_link_path: user_llvm_link_cmd() };
+    let extract_opts = ExtractOptions { input: exe_path,
+                                        output: bc_path,
+                                        llvm_link_path: user_llvm_link_cmd(),
+                                        verbose: vec![true] };
     extract_bitcode(extract_opts)?;
     eprintln!("## bitcode extracted");
     assert!(bc_path2.exists());
