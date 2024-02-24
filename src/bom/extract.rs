@@ -18,17 +18,12 @@ pub fn extract_bitcode_entrypoint(extract_options : &ExtractOptions) -> anyhow::
     let tmp_dir = tempfile::TempDir::new()?;
     let res = do_bitcode_extraction(extract_options, tmp_dir.path());
 
-    // The tmp_dir should always exist, so this should never execute the body of
-    // the if statement. However, the point of this is that *the tmp_dir should
-    // still exist*, and part of this is avoiding the "Early drop pitfall"
-    // described at https://docs.rs/tempfile/latest/tempfile, so this if
-    // expression uses the original tmp_dir thus allowing Rust to help us ensure
-    // it isn't dropped somewhere in do_bitcode_extraction by an inadvertent
-    // Copy/move that would trigger resource cleanup in disposal of this original
-    // object.
-    if !tmp_dir.path().exists() {
-        return Err(anyhow::Error::new(ExtractError::ErrorLostTmpDir));
-    };
+    // The following ensures that tmp_dir still has ownership of the associated
+    // resources and that they weren't inadvertently dropped during bitcode
+    // extraction.  This uses Rust's ownership to help avoid the "Early drop
+    // pitfall" described at https://docs.rs/tempfile/latest/tempfile.
+    std::mem::drop(tmp_dir);
+
     res
 }
 
