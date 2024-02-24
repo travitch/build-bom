@@ -1,5 +1,5 @@
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::bom::options::ExtractOptions;
@@ -8,14 +8,36 @@ use crate::bom::bitcode::ELF_SECTION_NAME;
 #[derive(thiserror::Error,Debug)]
 pub enum ExtractError {
     #[error("Error running command {0:} {1:?} ({2:?})")]
-    ErrorRunningCommand(String,Vec<OsString>,std::io::Error)
+    ErrorRunningCommand(String,Vec<OsString>,std::io::Error),
+
+    #[error("Temp directory lost during extraction")]
+    ErrorLostTmpDir,
 }
 
 pub fn extract_bitcode_entrypoint(extract_options : &ExtractOptions) -> anyhow::Result<i32> {
     let tmp_dir = tempfile::TempDir::new()?;
+    let res = do_bitcode_extraction(extract_options, tmp_dir.path());
+
+    // The tmp_dir should always exist, so this should never execute the body of
+    // the if statement. However, the point of this is that *the tmp_dir should
+    // still exist*, and part of this is avoiding the "Early drop pitfall"
+    // described at https://docs.rs/tempfile/latest/tempfile, so this if
+    // expression uses the original tmp_dir thus allowing Rust to help us ensure
+    // it isn't dropped somewhere in do_bitcode_extraction by an inadvertent
+    // Copy/move that would trigger resource cleanup in disposal of this original
+    // object.
+    if !tmp_dir.path().exists() {
+        return Err(anyhow::Error::new(ExtractError::ErrorLostTmpDir));
+    };
+    res
+}
+
+pub fn do_bitcode_extraction(extract_options : &ExtractOptions,
+                             tmp_path : &Path) -> anyhow::Result<i32> {
     let mut tar_path = PathBuf::new();
-    tar_path.push(tmp_dir.path());
+    tar_path.push(tmp_path);
     tar_path.push("bitcode.tar");
+    let ok_tar_name = OsString::from(tar_path.clone()).into_string().unwrap();
 
     // Use objcopy to extract our tar file from the target.  Note that objcopy
     // expects to write an output object.  If not given an output file, it will
@@ -45,13 +67,12 @@ pub fn extract_bitcode_entrypoint(extract_options : &ExtractOptions) -> anyhow::
     // above to hold the output llvm bitcode tar file.
     let mut objcopy_args = Vec::new();
     objcopy_args.push(OsString::from("--dump-section"));
-    let ok_tar_name = OsString::from(tar_path).into_string().unwrap();
     objcopy_args.push(OsString::from(format!("{}={}", ELF_SECTION_NAME, ok_tar_name)));
 
     objcopy_args.push(OsString::from(&extract_options.input));
 
     let mut objres = PathBuf::new();
-    objres.push(tmp_dir.path());
+    objres.push(tmp_path);
     objres.push("discard{output-file}");
     objcopy_args.push(OsString::from(objres));
 
@@ -76,7 +97,7 @@ pub fn extract_bitcode_entrypoint(extract_options : &ExtractOptions) -> anyhow::
         }
     }
 
-    // The tar file containing all of our bitcode is now in /tmp/{random}/bitcode.tar
+    // The tar file containing all of our bitcode is now in tar_path ("/tmp/{random}/bitcode.tar").
     //
     // We can extract it in that directory.  Note that we need to use tar -i because we
     // concatenated a number of tar files together.
@@ -86,7 +107,7 @@ pub fn extract_bitcode_entrypoint(extract_options : &ExtractOptions) -> anyhow::
     let mut tar_args = Vec::new();
     tar_args.push(OsString::from("xif"));
     tar_args.push(OsString::from(ok_tar_name));
-    match Command::new("tar").args(&tar_args).current_dir(&tmp_dir).spawn() {
+    match Command::new("tar").args(&tar_args).current_dir(tmp_path).spawn() {
         Err(msg) => {
             return Err(anyhow::Error::new(ExtractError::ErrorRunningCommand(String::from("tar"), tar_args, msg)));
         }
@@ -95,15 +116,15 @@ pub fn extract_bitcode_entrypoint(extract_options : &ExtractOptions) -> anyhow::
         }
     }
 
-    // Now all the files contained in the extracted bitcode.tar should be linked together
-    // to create the final bitcode file.
+    // Now all the files extracted from bitcode.tar into tmp_dir should be linked
+    // together to create the final bitcode file.
 
     let mut llvm_link_args = Vec::new();
     llvm_link_args.push(OsString::from("-o"));
     llvm_link_args.push(OsString::from(&extract_options.output));
 
     let mut bc_glob = String::new();
-    bc_glob.push_str(&OsString::from(tmp_dir.path()).into_string().unwrap());
+    bc_glob.push_str(&OsString::from(tmp_path).into_string().unwrap());
     bc_glob.push_str("/*.bc");
     let bc_files = glob::glob(&bc_glob)?;
     for bc_entry in bc_files {
