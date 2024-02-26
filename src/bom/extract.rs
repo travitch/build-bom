@@ -29,6 +29,10 @@ pub fn extract_bitcode_entrypoint(extract_options : &ExtractOptions) -> anyhow::
 
 pub fn do_bitcode_extraction(extract_options : &ExtractOptions,
                              tmp_path : &Path) -> anyhow::Result<i32> {
+    if ! extract_options.verbose.is_empty() {
+        println!("#=> Extracting bitcode from {:?}", extract_options.input);
+    }
+
     let mut tar_path = PathBuf::new();
     tar_path.push(tmp_path);
     tar_path.push("bitcode.tar");
@@ -124,6 +128,9 @@ pub fn do_bitcode_extraction(extract_options : &ExtractOptions,
     let bc_files = glob::glob(&bc_glob)?;
     for bc_entry in bc_files {
         let bc_file = bc_entry?;
+        if extract_options.verbose.len() > 1 {
+            println!("#: bitcode file: {:?}", bc_file.file_name().unwrap());
+        }
         llvm_link_args.push(OsString::from(bc_file));
     }
 
