@@ -1,4 +1,4 @@
-use log::info;
+use log::{debug, info};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -127,9 +127,7 @@ pub fn do_bitcode_extraction(extract_options : &ExtractOptions,
     let bc_files = glob::glob(&bc_glob)?;
     for bc_entry in bc_files {
         let bc_file = bc_entry?;
-        if extract_options.verbose.len() > 1 {
-            println!("#: bitcode file: {:?}", bc_file.file_name().unwrap());
-        }
+        debug!("#: bitcode file: {:?}", bc_file.file_name().unwrap());
         llvm_link_args.push(OsString::from(bc_file));
     }
 
