@@ -118,7 +118,9 @@ struct BCOpts<'a> {
     remove_arguments : &'a RegexSet,
     /// Strict: maintain strict adherence between the bitcode and the target code
     /// (optimization, target architecture, etc.)
-    strict : bool
+    strict : bool,
+    verbosity: usize,
+
 }
 
 pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i32> {
@@ -146,7 +148,7 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
     }
 
     let (mut sender, receiver) = mpsc::channel();
-    let stream_output = bitcode_options.verbose;
+    let stream_output = ! bitcode_options.verbose.is_empty();
     let event_consumer = thread::spawn(move || { collect_events(stream_output, receiver) });
 
     // This is a bit awkward. We would like to take a union over all of our
@@ -167,7 +169,8 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
                            suppress_automatic_debug : bitcode_options.suppress_automatic_debug,
                            inject_arguments : &bitcode_options.inject_arguments,
                            remove_arguments : &remove_rx,
-                           strict : bitcode_options.strict
+                           strict : bitcode_options.strict,
+                           verbosity : bitcode_options.verbose.len(),
     };
     let ptracer1 = generate_bitcode(&mut sender, ptracer, &bc_opts)?;
 
@@ -184,7 +187,9 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
         } else {
             |ec| ec
         };
-    print_summary(summary);
+    if ! bitcode_options.verbose.is_empty() {
+        print_summary(summary);
+    }
 
     let (mut last_ptracer, exitcode) = ptracer1;
     let tracee = last_ptracer.wait()?;
@@ -391,6 +396,11 @@ fn build_bitcode_compile_only(chan : &mut mpsc::Sender<Option<Event>>,
                 let out = child.wait_with_output()?;
                 if out.status.success() {
                     attach_bitcode(chan, cwd, &bc_args.resolved_object_target, &bc_args.resolved_bitcode_target)?;
+                    if bc_opts.verbosity > 1 {
+                        println!("#: injected {:?} into {:?}",
+                                 &bc_args.resolved_bitcode_target,
+                                 &bc_args.resolved_object_target);
+                    }
                 } else {
                     let err = Event::BitcodeCompileError(Path::new(&bc_opts.clang_path).to_path_buf(),
                                                          Vec::from(bc_args.bitcode_arguments.clone()),
@@ -1212,7 +1222,8 @@ mod tests {
                                   [r"^-remove$", r"^--this" ],
 
                               ).unwrap(),
-                              strict: false };
+                              strict: false,
+                              verbosity: 0 };
 
         // Simple cmdline specification
         let args = [ "-g", "-O1", "-o", "foo.obj",
