@@ -20,6 +20,8 @@ pete = "^0.7"
 os_pipe = "^0.9"
 anyhow = "^1"
 byteorder = "^1.3"
+env_logger = "0.11"
+log = "0.4"
 nix = "^0.22"
 structopt = "^0.3"
 serde = { version = "^1", features = ["derive"] }

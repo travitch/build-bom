@@ -45,7 +45,7 @@ fn user_llvm_link_cmd() -> Option<String> {
 fn gen_bitcode(gen_opts : BitcodeOptions) -> anyhow::Result<()> {
     let gen_cmd = Subcommand::GenerateBitcode(gen_opts);
     let gen_opt = Options { subcommand: gen_cmd };
-    let rc = bom::run_bom(gen_opt)?;
+    let rc = bom::run_bom_command(gen_opt)?;
     assert_eq!(rc, 0);
     Ok(())
 }
@@ -53,7 +53,7 @@ fn gen_bitcode(gen_opts : BitcodeOptions) -> anyhow::Result<()> {
 fn extract_bitcode(extract_opts : ExtractOptions) -> anyhow::Result<()> {
     let extract_cmd = Subcommand::ExtractBitcode(extract_opts);
     let extract_opt = Options { subcommand: extract_cmd };
-    let rc = bom::run_bom(extract_opt)?;
+    let rc = bom::run_bom_command(extract_opt)?;
     assert_eq!(rc, 0);
     Ok(())
 }

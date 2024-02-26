@@ -1,3 +1,4 @@
+use log::info;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
@@ -64,7 +65,7 @@ pub fn normalize_entrypoint(normalize_opts : &NormalizeOptions) -> anyhow::Resul
 
         }
         SomeLoadedTrace::NormalizedTrace(_) => {
-            println!("Input file {:?} is already normalized", &normalize_opts.input);
+            info!("Input file {:?} is already normalized", &normalize_opts.input);
         }
     }
 

@@ -5,7 +5,9 @@ use std::str::FromStr;
 use std::string::ToString;
 
 #[derive(Debug,StructOpt)]
-#[structopt(version = "1.0", author = "Tristan Ravitch")]
+#[structopt(version = "1.0", author = "Tristan Ravitch",
+            about="Utility to extract LLVM bitcode from a build process.\n\nLogging is controlled with various -v options or via the RUST_LOG/RUST_log_style as described in https://docs.rs/env_logger documentation."
+)]
 pub struct Options {
     #[structopt(subcommand)]
     pub subcommand : Subcommand
