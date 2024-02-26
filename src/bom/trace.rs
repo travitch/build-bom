@@ -1,3 +1,4 @@
+use log::{error, warn};
 use std::collections::{HashMap,BTreeMap};
 use std::io::Write;
 use std::ffi::OsString;
@@ -33,7 +34,7 @@ pub fn trace_entrypoint(trace_opts : &TraceOptions) -> anyhow::Result<()> {
     let _child = ptracer.spawn(cmd);
     match ptracer.wait()? {
         None => {
-            println!("Error spawning tracee (command: {})", trace_opts.command.join(" "));
+            error!("Error spawning tracee (command: {})", trace_opts.command.join(" "));
         }
         Some(tracee1) => {
             let root_pid = tracee1.pid;
@@ -107,7 +108,7 @@ fn trace_events(syscalls : BTreeMap<u64, String>, mut ptracer : Ptracer, mut wri
                     let to = read_str_from(&mut tracee, regs.r10);
                     write_event(&mut writer, &mut tracee, RawEventType::RenameAt { from_dir : from_fd, from : from, to_dir : to_fd, to : to })?;
                 } else {
-                    // println!("{:>16x}: [{}], {:?}", pc, syscall, tracee.stop);
+                    // debug!("{:>16x}: [{}], {:?}", pc, syscall, tracee.stop);
                 };
             },
             Stop::SyscallExit => {
@@ -139,7 +140,7 @@ fn trace_events(syscalls : BTreeMap<u64, String>, mut ptracer : Ptracer, mut wri
 
             },
             _ => {
-                // println!("{:>16x}: {:?}", pc, tracee.stop);
+                // debug!("{:>16x}: {:?}", pc, tracee.stop);
             },
         }
 
@@ -168,7 +169,7 @@ fn record_events(file_path : PathBuf, rdr : PipeReader, root_pid : i32) -> anyho
     // receive.
     loop {
         match rmp_serde::decode::from_read::<_, Option<TraceEvent<RawEventType<Vec<u8>>>>>(rdr.borrow()) {
-            Err(e) => { println!("Error recording event: {}", e) }
+            Err(e) => { warn!("Error recording event: {}", e) }
             Ok(None) => { break; }
             Ok(Some(trace_event)) => {
                 // If we get an exec with its full environment inlined, start

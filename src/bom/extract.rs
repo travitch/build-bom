@@ -1,3 +1,4 @@
+use log::info;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -29,9 +30,7 @@ pub fn extract_bitcode_entrypoint(extract_options : &ExtractOptions) -> anyhow::
 
 pub fn do_bitcode_extraction(extract_options : &ExtractOptions,
                              tmp_path : &Path) -> anyhow::Result<i32> {
-    if ! extract_options.verbose.is_empty() {
-        println!("#=> Extracting bitcode from {:?}", extract_options.input);
-    }
+    info!("#=> Extracting bitcode from {:?}", extract_options.input);
 
     let mut tar_path = PathBuf::new();
     tar_path.push(tmp_path);
