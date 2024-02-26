@@ -149,8 +149,7 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
     }
 
     let (mut sender, receiver) = mpsc::channel();
-    let stream_output = ! bitcode_options.verbose.is_empty();
-    let event_consumer = thread::spawn(move || { collect_events(stream_output, receiver) });
+    let event_consumer = thread::spawn(move || { collect_events(receiver) });
 
     // This is a bit awkward. We would like to take a union over all of our
     // regexes so that we only need to perform the match test once per argument
@@ -188,7 +187,7 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
         } else {
             |ec| ec
         };
-    if ! bitcode_options.verbose.is_empty() {
+    if bc_opts.verbosity > 0 {
         print_summary(summary);
     }
 
@@ -738,7 +737,7 @@ impl SummaryStats {
     }
 }
 
-fn collect_events(stream_errors : bool, chan : mpsc::Receiver<Option<Event>>) -> SummaryStats {
+fn collect_events(chan : mpsc::Receiver<Option<Event>>) -> SummaryStats {
     let mut summary = SummaryStats { num_pipe_io : 0,
                                      num_responsefile : 0,
                                      unresolved_implicit_outputs : 0,
@@ -762,55 +761,39 @@ fn collect_events(stream_errors : bool, chan : mpsc::Receiver<Option<Event>>) ->
                 match evt {
                     Event::PipeInputOrOutput(cmd) => {
                         summary.num_pipe_io += 1;
-                        if stream_errors {
-                            error!("Pipe I/O in command '{:?} {:?}'", cmd.bin, cmd.args);
-                        }
+                        error!("Pipe I/O in command '{:?} {:?}'", cmd.bin, cmd.args);
                     }
                     Event::ResponseFile(cmd) => {
                         summary.num_responsefile += 1;
-                        if stream_errors {
-                            error!("Response file in command '{:?} {:?}'", cmd.bin, cmd.args);
-                        }
+                        error!("Response file in command '{:?} {:?}'", cmd.bin, cmd.args);
                     }
                     Event::MultipleInputsWithImplicitOutput(cmd, args) => {
                         summary.unresolved_implicit_outputs += 1;
-                        if stream_errors {
-                            error!("Unresolved implicit outputs with multiple input files in command '{:?} {:?}'", cmd, args);
-                        }
+                        error!("Unresolved implicit outputs with multiple input files in command '{:?} {:?}'", cmd, args);
                     }
                     Event::BuildFailureSkippedBitcode(cmd, exit_code) => {
                         summary.build_failures_skipping_bitcode += 1;
-                        if stream_errors {
-                            error!("Skipping bitcode generation due to failed compile command '{:?} {:?} = {}'", cmd.bin, cmd.args, exit_code);
-                        }
+                        error!("Skipping bitcode generation due to failed compile command '{:?} {:?} = {}'", cmd.bin, cmd.args, exit_code);
                     }
                     Event::BuildFailureUnknownEffect(cmd, exit_code) => {
                         summary.build_failures_unknown_effect += 1;
-                        if stream_errors {
-                            error!("Failed compile command may affect bitcode coverage '{:?} {:?} = {}'", cmd.bin, cmd.args, exit_code);
-                        }
+                        error!("Failed compile command may affect bitcode coverage '{:?} {:?} = {}'", cmd.bin, cmd.args, exit_code);
                     }
                     Event::SkippingAssembleOnlyCommand(cmd) => {
                         summary.skipping_assemble_only += 1;
-                        if stream_errors {
-                            error!("Skipping bitcode generation for assemble-only command '{:?} {:?}'", cmd.bin, cmd.args);
-                        }
+                        error!("Skipping bitcode generation for assemble-only command '{:?} {:?}'", cmd.bin, cmd.args);
                     }
                     Event::BitcodeCompileError(cmd, args, stdout, stderr, exit_code) => {
                         summary.bitcode_compile_errors += 1;
-                        if stream_errors {
-                            error!("Error while compiling bitcode ('{:?} {:?}' = {:?})", cmd, args, exit_code);
-                            info!("  stdout: {}", String::from_utf8_lossy(&stdout).into_owned());
-                            info!("  stderr: {}", String::from_utf8_lossy(&stderr).into_owned());
-                        }
+                        error!("Error while compiling bitcode ('{:?} {:?}' = {:?})", cmd, args, exit_code);
+                        info!("  stdout: {}", String::from_utf8_lossy(&stdout).into_owned());
+                        info!("  stderr: {}", String::from_utf8_lossy(&stderr).into_owned());
                     }
                     Event::BitcodeAttachError(cmd, args, stdout, stderr, exit_code) => {
                         summary.bitcode_attach_errors += 1;
-                        if stream_errors {
-                            error!("Error while attaching bitcode ('{:?} {:?}' = {:?})", cmd, args, exit_code);
-                            info!("  stdout: {}", String::from_utf8_lossy(&stdout).into_owned());
-                            info!("  stderr: {}", String::from_utf8_lossy(&stderr).into_owned());
-                        }
+                        error!("Error while attaching bitcode ('{:?} {:?}' = {:?})", cmd, args, exit_code);
+                        info!("  stdout: {}", String::from_utf8_lossy(&stdout).into_owned());
+                        info!("  stderr: {}", String::from_utf8_lossy(&stderr).into_owned());
                     }
                     Event::BitcodeGenerationAttempts => {
                         summary.bitcode_generation_attempts += 1;
