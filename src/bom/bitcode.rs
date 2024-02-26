@@ -140,7 +140,7 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
     let _child = ptracer.spawn(cmd);
     match ptracer.wait()? {
         None => {
-            println!("Error spawning tracee (command: {})", bitcode_options.command.join(" "));
+            eprintln!("Error spawning tracee (command: {})", bitcode_options.command.join(" "));
         }
         Some(tracee) => {
             ptracer.restart(tracee, pete::Restart::Syscall)?;
@@ -551,7 +551,7 @@ fn obj_already_has_bitcode(cwd : &Path, obj_target : &OsString) -> bool {
         .current_dir(cwd)
         .output() {
             Err(err) => {
-                println!("Error checking {:?} section existence: {:?}", ELF_SECTION_NAME, err);
+                eprintln!("Error checking {:?} section existence: {:?}", ELF_SECTION_NAME, err);
                 // TODO something else here?  another event?
                 false
             }
@@ -755,7 +755,7 @@ fn collect_events(stream_errors : bool, chan : mpsc::Receiver<Option<Event>>) ->
     loop {
         match chan.recv() {
             Err(err_msg) => {
-                println!("Event collector exiting early due to error: {:?}", err_msg);
+                eprintln!("Event collector exiting early due to error: {:?}", err_msg);
                 return summary;
             }
             Ok(None) => { return summary }
@@ -764,53 +764,53 @@ fn collect_events(stream_errors : bool, chan : mpsc::Receiver<Option<Event>>) ->
                     Event::PipeInputOrOutput(cmd) => {
                         summary.num_pipe_io += 1;
                         if stream_errors {
-                            println!("Pipe I/O in command '{:?} {:?}'", cmd.bin, cmd.args);
+                            eprintln!("Pipe I/O in command '{:?} {:?}'", cmd.bin, cmd.args);
                         }
                     }
                     Event::ResponseFile(cmd) => {
                         summary.num_responsefile += 1;
                         if stream_errors {
-                            println!("Response file in command '{:?} {:?}'", cmd.bin, cmd.args);
+                            eprintln!("Response file in command '{:?} {:?}'", cmd.bin, cmd.args);
                         }
                     }
                     Event::MultipleInputsWithImplicitOutput(cmd, args) => {
                         summary.unresolved_implicit_outputs += 1;
                         if stream_errors {
-                            println!("Unresolved implicit outputs with multiple input files in command '{:?} {:?}'", cmd, args);
+                            eprintln!("Unresolved implicit outputs with multiple input files in command '{:?} {:?}'", cmd, args);
                         }
                     }
                     Event::BuildFailureSkippedBitcode(cmd, exit_code) => {
                         summary.build_failures_skipping_bitcode += 1;
                         if stream_errors {
-                            println!("Skipping bitcode generation due to failed compile command '{:?} {:?} = {}'", cmd.bin, cmd.args, exit_code);
+                            eprintln!("Skipping bitcode generation due to failed compile command '{:?} {:?} = {}'", cmd.bin, cmd.args, exit_code);
                         }
                     }
                     Event::BuildFailureUnknownEffect(cmd, exit_code) => {
                         summary.build_failures_unknown_effect += 1;
                         if stream_errors {
-                            println!("Failed compile command may affect bitcode coverage '{:?} {:?} = {}'", cmd.bin, cmd.args, exit_code);
+                            eprintln!("Failed compile command may affect bitcode coverage '{:?} {:?} = {}'", cmd.bin, cmd.args, exit_code);
                         }
                     }
                     Event::SkippingAssembleOnlyCommand(cmd) => {
                         summary.skipping_assemble_only += 1;
                         if stream_errors {
-                            println!("Skipping bitcode generation for assemble-only command '{:?} {:?}'", cmd.bin, cmd.args);
+                            eprintln!("Skipping bitcode generation for assemble-only command '{:?} {:?}'", cmd.bin, cmd.args);
                         }
                     }
                     Event::BitcodeCompileError(cmd, args, stdout, stderr, exit_code) => {
                         summary.bitcode_compile_errors += 1;
                         if stream_errors {
-                            println!("Error while compiling bitcode ('{:?} {:?}' = {:?})", cmd, args, exit_code);
-                            println!("  stdout: {}", String::from_utf8_lossy(&stdout).into_owned());
-                            println!("  stderr: {}", String::from_utf8_lossy(&stderr).into_owned());
+                            eprintln!("Error while compiling bitcode ('{:?} {:?}' = {:?})", cmd, args, exit_code);
+                            eprintln!("  stdout: {}", String::from_utf8_lossy(&stdout).into_owned());
+                            eprintln!("  stderr: {}", String::from_utf8_lossy(&stderr).into_owned());
                         }
                     }
                     Event::BitcodeAttachError(cmd, args, stdout, stderr, exit_code) => {
                         summary.bitcode_attach_errors += 1;
                         if stream_errors {
-                            println!("Error while attaching bitcode ('{:?} {:?}' = {:?})", cmd, args, exit_code);
-                            println!("  stdout: {}", String::from_utf8_lossy(&stdout).into_owned());
-                            println!("  stderr: {}", String::from_utf8_lossy(&stderr).into_owned());
+                            eprintln!("Error while attaching bitcode ('{:?} {:?}' = {:?})", cmd, args, exit_code);
+                            eprintln!("  stdout: {}", String::from_utf8_lossy(&stdout).into_owned());
+                            eprintln!("  stderr: {}", String::from_utf8_lossy(&stderr).into_owned());
                         }
                     }
                     Event::BitcodeGenerationAttempts => {
@@ -857,7 +857,7 @@ fn handle_start_execve(tracee : &mut pete::Tracee, regs : pete::Registers, proce
     // SyscallExitStop)
     match make_command(&bin, &args, env, cwd) {
         Err(msg) => {
-            println!("Error decoding strings to build command: {:?}", msg);
+            eprintln!("Error decoding strings to build command: {:?}", msg);
         }
         Ok(cmd) => {
             process_state.insert(tracee.pid.as_raw() as i32, ProcessState::TryExec(cmd));
@@ -877,13 +877,13 @@ fn handle_exit_execve(pid : pete::Pid, regs : pete::Registers, process_state : &
         // know that we have execed this command
         match process_state.remove(&ipid) {
             None => {
-                println!("Missing expected exec command for process id {}", ipid);
+                eprintln!("Missing expected exec command for process id {}", ipid);
             }
             Some(ProcessState::TryExec(rc)) => {
                 process_state.insert(ipid, ProcessState::FinishExec(rc));
             }
             Some(ProcessState::FinishExec(rc)) => {
-                println!("Unexpected finish event for already finished command {:?}", rc);
+                eprintln!("Unexpected finish event for already finished command {:?}", rc);
             }
         }
     }
@@ -1116,7 +1116,7 @@ fn post_process_actions(rc : RunCommand,
         // original command name (i.e., argv[0])
         let (_, rest_args) = rc.args.split_at(1);
         match build_bitcode_compile_only(chan, bc_opts, rest_args, &rc.cwd) {
-            Err(err) => { println!("Error building bitcode: {:?}", err) }
+            Err(err) => { eprintln!("Error building bitcode: {:?}", err) }
             Ok(_) => {}
         }
     }
