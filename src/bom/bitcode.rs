@@ -621,7 +621,7 @@ fn inject_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
 /// To avoid collisions, we append a hash to each filename
 fn build_bitcode_tar(bc_target : &OsString,
                      bc_path : &Path,
-                     hash : &[u8],
+                     hash : &str,
                      tar_file : &mut tempfile::NamedTempFile) -> anyhow::Result<()> {
     let mut tb = tar::Builder::new(tar_file);
     let bc_target_path = Path::new(bc_target);
@@ -630,7 +630,7 @@ fn build_bitcode_tar(bc_target : &OsString,
     let mut archived_name = OsString::new();
     archived_name.push(bc_target_path.file_stem().unwrap());
     archived_name.push("-");
-    archived_name.push(hex::encode(hash));
+    archived_name.push(hash);
     archived_name.push(".");
     archived_name.push(bc_target_path.extension().unwrap());
 
@@ -639,6 +639,20 @@ fn build_bitcode_tar(bc_target : &OsString,
 
     Ok(())
 }
+
+
+fn bitcode_hashval(cwd : &Path, bc_target : &OsString) -> anyhow::Result<String> {
+    let bc_path = to_absolute(cwd, bc_target);
+
+    let mut hasher = Sha256::new();
+    let mut bc_content = Vec::new();
+    let mut bc_file = std::fs::File::open(&bc_path)?;
+    bc_file.read_to_end(&mut bc_content)?;
+    hasher.update(bc_content);
+    let hash = hasher.finalize();
+    Ok(hex::encode(hash.as_slice()))
+}
+
 
 /// Attach the bitcode file at the given path to its associated object file target
 ///
@@ -652,18 +666,13 @@ fn attach_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
     let object_path = to_absolute(cwd, orig_target);
     let bc_path = to_absolute(cwd, bc_target);
 
-    let mut hasher = Sha256::new();
-    let mut bc_content = Vec::new();
-    let mut bc_file = std::fs::File::open(&bc_path)?;
-    bc_file.read_to_end(&mut bc_content)?;
-    hasher.update(bc_content);
-    let hash = hasher.finalize();
+    let bc_hex = bitcode_hashval(cwd, bc_target)?;
 
     // This temporary file is filled in by `build_bitcode_tar`; however, we
     // allocate it here so that it is still in scope (i.e., not deleted) when we
     // invoke `inject_bitcode`
     let mut tar_file = tempfile::NamedTempFile::new()?;
-    build_bitcode_tar(bc_target, bc_path.as_path(), hash.as_slice(), &mut tar_file)?;
+    build_bitcode_tar(bc_target, bc_path.as_path(), &bc_hex, &mut tar_file)?;
 
     let tar_name = OsString::from(tar_file.path());
     let ok_tar_name = tar_name.into_string().ok().unwrap();
