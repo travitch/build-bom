@@ -81,7 +81,7 @@ use std::collections::HashMap;
 use std::path::{Path,PathBuf};
 use std::io::Read;
 use std::process;
-use std::ffi::{OsString};
+use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::OsStringExt;
 use std::process::Command;
 use std::sync::mpsc;
@@ -641,8 +641,8 @@ fn build_bitcode_tar(bc_target : &OsString,
 }
 
 
-fn bitcode_hashval(cwd : &Path, bc_target : &OsString) -> anyhow::Result<String> {
-    let bc_path = to_absolute(cwd, bc_target);
+fn bitcode_hashval(cwd : &Path, bc_target : &OsStr) -> anyhow::Result<String> {
+    let bc_path = to_absolute(cwd, &bc_target.to_os_string());
 
     let mut hasher = Sha256::new();
     let mut bc_content = Vec::new();
