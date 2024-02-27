@@ -79,7 +79,7 @@ use log::{debug, info, warn, error};
 use regex::RegexSet;
 use std::collections::HashMap;
 use std::path::{Path,PathBuf};
-use std::io::Read;
+use std::io::{Read,Write};
 use std::process;
 use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::OsStringExt;
@@ -619,10 +619,12 @@ fn inject_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
 /// directories with source files that have similar names.
 ///
 /// To avoid collisions, we append a hash to each filename
-fn build_bitcode_tar(bc_target : &OsString,
-                     bc_path : &Path,
-                     hash : &str,
-                     tar_file : &mut tempfile::NamedTempFile) -> anyhow::Result<()> {
+fn build_bitcode_tar<O>(bc_target : &OsString,
+                        bc_path : &Path,
+                        hash : &str,
+                        tar_file : &O) -> anyhow::Result<()>
+where for<'a> &'a O: Write
+{
     let mut tb = tar::Builder::new(tar_file);
     let bc_target_path = Path::new(bc_target);
 
