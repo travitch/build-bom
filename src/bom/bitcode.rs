@@ -619,21 +619,18 @@ fn inject_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
 /// directories with source files that have similar names.
 ///
 /// To avoid collisions, we append a hash to each filename
-fn build_bitcode_tar(bc_target : &OsString,
-                     bc_path : &Path,
-                     hash : &str,
+fn build_bitcode_tar(bc_path : &Path,
                      tar_file : impl Write) -> anyhow::Result<()>
 {
+    let hash = bitcode_hashval(bc_path)?;
     let mut tb = tar::Builder::new(tar_file);
-    let bc_target_path = Path::new(bc_target);
-
 
     let mut archived_name = OsString::new();
-    archived_name.push(bc_target_path.file_stem().unwrap());
+    archived_name.push(bc_path.file_stem().unwrap());
     archived_name.push("-");
     archived_name.push(hash);
     archived_name.push(".");
-    archived_name.push(bc_target_path.extension().unwrap());
+    archived_name.push(bc_path.extension().unwrap());
 
     tb.append_path_with_name(bc_path, &archived_name)?;
     tb.into_inner()?;
@@ -642,9 +639,7 @@ fn build_bitcode_tar(bc_target : &OsString,
 }
 
 
-fn bitcode_hashval(cwd : &Path, bc_target : &OsStr) -> anyhow::Result<String> {
-    let bc_path = to_absolute(cwd, &bc_target.to_os_string());
-
+fn bitcode_hashval(bc_path : &Path) -> anyhow::Result<String> {
     let mut hasher = Sha256::new();
     let mut bc_content = Vec::new();
     let mut bc_file = std::fs::File::open(&bc_path)?;
@@ -673,7 +668,7 @@ fn attach_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
     // allocate it here so that it is still in scope (i.e., not deleted) when we
     // invoke `inject_bitcode`
     let mut tar_file = tempfile::NamedTempFile::new()?;
-    build_bitcode_tar(bc_target, bc_path.as_path(), &bc_hex, &mut tar_file)?;
+    build_bitcode_tar(bc_path.as_path(), &mut tar_file)?;
 
     let tar_name = OsString::from(tar_file.path());
     let ok_tar_name = tar_name.into_string().ok().unwrap();
