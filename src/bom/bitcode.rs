@@ -81,7 +81,7 @@ use std::collections::HashMap;
 use std::path::{Path,PathBuf};
 use std::io::{Read,Write};
 use std::process;
-use std::ffi::{OsStr, OsString};
+use std::ffi::{OsString};
 use std::os::unix::ffi::OsStringExt;
 use std::process::Command;
 use std::sync::mpsc;
@@ -661,8 +661,6 @@ fn attach_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
                   bc_target : &OsString) -> anyhow::Result<()> {
     let object_path = to_absolute(cwd, orig_target);
     let bc_path = to_absolute(cwd, bc_target);
-
-    let bc_hex = bitcode_hashval(cwd, bc_target)?;
 
     // This temporary file is filled in by `build_bitcode_tar`; however, we
     // allocate it here so that it is still in scope (i.e., not deleted) when we
