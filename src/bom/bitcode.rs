@@ -619,11 +619,10 @@ fn inject_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
 /// directories with source files that have similar names.
 ///
 /// To avoid collisions, we append a hash to each filename
-fn build_bitcode_tar<O>(bc_target : &OsString,
-                        bc_path : &Path,
-                        hash : &str,
-                        tar_file : &O) -> anyhow::Result<()>
-where for<'a> &'a O: Write
+fn build_bitcode_tar(bc_target : &OsString,
+                     bc_path : &Path,
+                     hash : &str,
+                     tar_file : impl Write) -> anyhow::Result<()>
 {
     let mut tb = tar::Builder::new(tar_file);
     let bc_target_path = Path::new(bc_target);
