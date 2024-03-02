@@ -37,6 +37,7 @@ sha2 = "^0.9"
 hex = "0.4"
 regex = "1"
 lazy_static = "1"
+chainsop = { git = "https://github.com/kquick/chainsop.git" }
 
 [dev-dependencies]
 xshell = "0.1"
