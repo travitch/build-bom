@@ -90,8 +90,7 @@ use std::thread;
 use sha2::{Digest,Sha256};
 use thiserror::Error;
 use chainsop::{ChainedOps, Executable, ExeFileSpec, OpInterface,
-               FileArg, FilesPrep, ActualFile, FileRef, FunctionOperation,
-               SubProcOperation,OsRun};
+               FileArg, FilesPrep, FunctionOperation, SubProcOperation,OsRun};
 
 use crate::bom::options::{BitcodeOptions, get_executor};
 use crate::bom::syscalls::load_syscalls;
@@ -244,11 +243,10 @@ fn make_bitcode_filename(target : &OsString, bc_dir : &Option<&PathBuf>) -> Path
 /// This handles removing flags that clang can't handle (or that we definitely
 /// do not want for bitcode generation), as well as transforming the output file
 /// path
-fn build_bitcode_arguments<E>(chan : &mut mpsc::Sender<Option<Event>>,
-                              bc_opts : &BCOpts<E>,
-                              orig_args : &[OsString],
-                              ops : &mut ChainedOps) -> anyhow::Result<OsString>
-where E: OsRun
+fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
+                           bc_opts : &BCOpts<impl OsRun>,
+                           orig_args : &[OsString],
+                           ops : &mut ChainedOps) -> anyhow::Result<OsString>
 {
     let mut orig_target = None;
 
@@ -256,6 +254,7 @@ where E: OsRun
         &SubProcOperation::new(&Executable::new(bc_opts.clang_path,
                                                 ExeFileSpec::Append,
                                                 ExeFileSpec::option("-o")))
+            .set_label("clang:emit-llvm")
             // Emit llvm bitcode, which is a compile-only operation
             .push_arg("-emit-llvm")
             .push_arg("-c"));
@@ -312,8 +311,8 @@ where E: OsRun
             skip_next = clang_support::next_arg_is_option_value(arg);
             continue;
         } else {
-            if ! arg.to_str().unwrap().starts_with("-o") {
-                if arg.to_str().unwrap().starts_with("-") {
+            if ! arg.to_string_lossy().starts_with("-o") {
+                if arg.to_string_lossy().starts_with("-") {
                     bcgen_op.push_arg(arg);
                     next_is_val = clang_support::next_arg_is_option_value(arg);
                 } else {
@@ -378,11 +377,10 @@ where E: OsRun
     }
 }
 
-fn build_bitcode_compile_only<E>(chan : &mut mpsc::Sender<Option<Event>>,
-                                 bc_opts : &BCOpts<E>,
-                                 args : &[OsString],
-                                 cwd : &Path) -> anyhow::Result<OsString>
-where E: OsRun
+fn build_bitcode_compile_only(chan : &mut mpsc::Sender<Option<Event>>,
+                              bc_opts : &BCOpts<impl OsRun>,
+                              args : &[OsString],
+                              cwd : &Path) -> anyhow::Result<OsString>
 {
     let mut bitcode_ops = ChainedOps::new("bitcode generation ops");
 
@@ -408,18 +406,19 @@ where E: OsRun
         bitcode_ops.push_op(
             &SubProcOperation::new(
                 &Executable::new("objcopy",
-                                 ExeFileSpec::option(&(ELF_SECTION_NAME.to_owned() + "=")),
+//                                  ExeFileSpec::option(&(ELF_SECTION_NAME.to_owned() + "=")),
+                                 ExeFileSpec::option(&format!("{}=", ELF_SECTION_NAME)),
                                  ExeFileSpec::Append))
                 .push_arg("--add-section"));
 
         match bitcode_ops.execute(&bc_opts.executor, &Some(cwd)) {
-            Ok(obj_file) => {
-                let objf = obj_file.to_paths(&Some(cwd))
+            Ok(obj_output) => {
+                let objf = obj_output.to_paths(&Some(cwd))
                     .context("getting result object file")?
                     .iter().map(|p| p.to_str().unwrap()).collect::<Vec<_>>()
                     .join(",");
                 let _res = chan.send(Some(Event::BitcodeCaptured(objf.into())));
-                debug!("#: injected bitcode into {:?}", obj_file);
+                debug!("#: injected bitcode into {:?}", obj_output);
             }
             Err(e) => {
                 error!("Error attaching bitcode: {:?}", e);
@@ -786,12 +785,11 @@ fn handle_exit_execve(pid : pete::Pid, regs : pete::Registers, process_state : &
 /// short time later, but the post_process_actions should only be run
 /// when the output file exists (and therefore after the actual exec
 /// completes.
-fn handle_process_exit<E>(chan : &mut mpsc::Sender<Option<Event>>,
-                          pid : pete::Pid,
-                          exit_code : i32,
-                          process_state : &mut HashMap<i32, ProcessState>,
-                          bc_opts : &BCOpts<E>)
-where E: OsRun
+fn handle_process_exit(chan : &mut mpsc::Sender<Option<Event>>,
+                       pid : pete::Pid,
+                       exit_code : i32,
+                       process_state : &mut HashMap<i32, ProcessState>,
+                       bc_opts : &BCOpts<impl OsRun>)
 {
     let ipid = pid.as_raw() as i32;
     match process_state.remove(&ipid) {
@@ -991,10 +989,9 @@ fn should_make_bc(rc : &RunCommand, comp_mods : &CompileModifiers,
 
 /// Determine what actions should be taken on the successful execution
 /// completion of a build process action.
-fn post_process_actions<E>(rc : RunCommand,
-                           chan : &mut mpsc::Sender<Option<Event>>,
-                           bc_opts : &BCOpts<E>)
-where E: OsRun
+fn post_process_actions(rc : RunCommand,
+                        chan : &mut mpsc::Sender<Option<Event>>,
+                        bc_opts : &BCOpts<impl OsRun>)
 {
     let comp_mods = extract_compile_modifiers(&rc);
     if should_make_bc(&rc, &comp_mods, chan) {
@@ -1014,11 +1011,10 @@ where E: OsRun
 }
 
 
-fn generate_bitcode<E>(chan : &mut mpsc::Sender<Option<Event>>,
-                       mut ptracer : pete::Ptracer,
-                       bc_opts : &BCOpts<E>)
-                       -> anyhow::Result<(pete::Ptracer, i32)>
-where E: OsRun
+fn generate_bitcode(chan : &mut mpsc::Sender<Option<Event>>,
+                    mut ptracer : pete::Ptracer,
+                    bc_opts : &BCOpts<impl OsRun>)
+                    -> anyhow::Result<(pete::Ptracer, i32)>
 {
     let mut process_state = HashMap::new();
     let syscalls = load_syscalls();
@@ -1101,7 +1097,7 @@ mod tests {
     use std::rc::Rc;
     use std::sync::mpsc;
     use super::*;
-    use chainsop::{Executor, OsRun, OsRunResult};
+    use chainsop::{ActualFile, Executor, OsRun, OsRunResult};
 
     #[derive(Clone, Debug, PartialEq)]
     struct RunExec {
@@ -1245,7 +1241,7 @@ mod tests {
         // Verify full recorded sequence trace
         assert_eq!(captured,
                    [ TestOp::SPO(
-                       RunExec { name: "/path/to/clang".to_string(),
+                       RunExec { name: "clang:emit-llvm".to_string(),
                                  exe: "/path/to/clang".into(),
                                  args: [
                                      "-emit-llvm",
@@ -1328,7 +1324,7 @@ mod tests {
         // Verify full recorded sequence trace
         assert_eq!(captured1,
                    [ TestOp::SPO(
-                       RunExec { name: "/path/to/clang".to_string(),
+                       RunExec { name: "clang:emit-llvm".to_string(),
                                  exe: "/path/to/clang".into(),
                                  args: [
                                      "-emit-llvm",
@@ -1419,7 +1415,7 @@ mod tests {
         // Verify full recorded sequence trace
         assert_eq!(captured2,
                    [ TestOp::SPO(
-                       RunExec { name: "/path/to/clang".to_string(),
+                       RunExec { name: "clang:emit-llvm".to_string(),
                                  exe: "/path/to/clang".into(),
                                  args: [
                                      "-emit-llvm",

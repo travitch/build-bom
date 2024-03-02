@@ -2,7 +2,7 @@ use log::{info};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use chainsop::{ChainedOps, Executable, ExeFileSpec, OpInterface,
-               FileArg, FilesPrep, SubProcOperation, execute_here};
+               FileArg, FilesPrep, SubProcOperation};
 
 use crate::bom::options::{ExtractOptions, get_executor};
 use crate::bom::bitcode::ELF_SECTION_NAME;
@@ -66,14 +66,15 @@ pub fn do_bitcode_extraction(extract_options : &ExtractOptions,
     // directory, and there is already a convenient temporary directory created
     // above to hold the output llvm bitcode tar file.
     let mut dummy_output = PathBuf::from(tmp_path);
-    dummy_output.push("discard{output-file}");
+    dummy_output.push("discard{output-file}");  // arbitrary name
 
     extract_ops.push_op(
         &SubProcOperation::new(&Executable::new("objcopy",
                                                 ExeFileSpec::Append,
                                                 ExeFileSpec::Append))
+            .set_label("objcopy:extract-bitcode")
             .push_arg("--dump-section")
-            .push_arg(ELF_SECTION_NAME.to_owned() + "=" + &ok_tar_name)
+            .push_arg(format!("{}={}", ELF_SECTION_NAME, ok_tar_name))
             .set_output_file(&FileArg::loc(dummy_output)));
 
     // The tar file containing all of our bitcode is now in tar_path ("/tmp/{random}/bitcode.tar").
@@ -89,7 +90,7 @@ pub fn do_bitcode_extraction(extract_options : &ExtractOptions,
             &Executable::new("tar",
                              ExeFileSpec::Append,
                              ExeFileSpec::NoFileUsed))
-            .set_label("tar unpack")
+            .set_label("tar:unpack")
             .push_arg("xif")
             .set_dir(tmp_path)  // Extracted files will be placed here
             // Input here is explicitly the section dump target file rather
@@ -110,5 +111,5 @@ pub fn do_bitcode_extraction(extract_options : &ExtractOptions,
     link_bc_files.set_input_file(&FileArg::glob_in(tmp_path, "*.bc"));
 
     let executor = get_executor(extract_options.verbose.len());
-    execute_here(&mut extract_ops, &executor).map(|_| 0)
+    extract_ops.execute_here(&executor).map(|_| 0)
 }
