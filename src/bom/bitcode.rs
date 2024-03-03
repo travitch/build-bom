@@ -100,8 +100,6 @@ use crate::bom::clang_support;
 
 #[derive(Error, Debug)]
 pub enum TracerError {
-    #[error("No tracee on top-level subprocess exit")]
-    NoTraceeOnExit,
     #[error("Unexpected exit state on top-level subprocess exit")]
     UnexpectedExitState(pete::Stop),
     #[error("No command given")]
