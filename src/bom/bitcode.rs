@@ -406,7 +406,6 @@ fn build_bitcode_compile_only(chan : &mut mpsc::Sender<Option<Event>>,
         bitcode_ops.push_op(
             &SubProcOperation::new(
                 &Executable::new("objcopy",
-//                                  ExeFileSpec::option(&(ELF_SECTION_NAME.to_owned() + "=")),
                                  ExeFileSpec::option(&format!("{}=", ELF_SECTION_NAME)),
                                  ExeFileSpec::Append))
                 .push_arg("--add-section"));
