@@ -1,3 +1,4 @@
+use chainsop::Executor;
 use regex::Regex;
 use structopt::StructOpt;
 use std::path::PathBuf;
@@ -169,4 +170,12 @@ pub enum StringNormalizeStrategy {
 
 impl Default for StringNormalizeStrategy {
     fn default () -> Self { StringNormalizeStrategy ::Strict }
+}
+
+pub fn get_executor(verbosity: usize) -> Executor {
+    match verbosity {
+        0 => Executor::NormalRun,
+        1 => Executor::NormalWithLabel,
+        _ => Executor::NormalWithEcho,
+    }
 }
