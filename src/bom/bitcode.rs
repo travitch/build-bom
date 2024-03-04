@@ -75,7 +75,7 @@
 // to extract any requested bitcode file; the build tree no longer
 // needs to be present.
 
-use anyhow::Context;
+use anyhow::{bail, Context};
 use log::{debug, warn, error};
 use regex::RegexSet;
 use std::collections::HashMap;
@@ -128,7 +128,7 @@ struct BCOpts<'a,  Exec: OsRun> {
 
 pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i32> {
     if bitcode_options.command.len() == 0 {
-        return Err(anyhow::Error::new(TracerError::NoCommandGiven));
+        bail!(TracerError::NoCommandGiven);
     }
 
     let (cmd0, args0) = bitcode_options.command.split_at(1);
@@ -284,8 +284,6 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
     let mut it = orig_args.iter();
     while let Some(arg) = it.next() {
 
-        // let next_is_value = clang_support::next_arg_is_option_value(arg);
-
         // Skip any arguments explicitly blacklisted or any matching any of the
         // user-provided regexes.  Note that this is of course as unsafe as users
         // make it.  In particular, rejecting '-o' would be very bad.
@@ -308,10 +306,9 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
             if arg == "-o" {
                 match it.next() {
                     None => {
-                        return Err(anyhow::Error::new(
-                            BitcodeError::MissingOutputFile(
-                                Path::new(&bc_opts.clang_path).to_path_buf(),
-                                Vec::from(orig_args))));
+                        bail!(BitcodeError::MissingOutputFile(
+                            Path::new(&bc_opts.clang_path).to_path_buf(),
+                            Vec::from(orig_args)));
                     }
                     Some(target) => {
                         orig_target = Some(PathBuf::from(&target).into_os_string());
@@ -335,11 +332,10 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
                     match it.next() {
                         Some(val) => { bcgen_op.push_arg(val); }
                         None => {
-                            return Err(anyhow::Error::new(
-                                BitcodeError::MissingArgValue(
-                                    orig_compiler_cmd.into(),
-                                    orig_args.to_vec(),
-                                    arg.clone())));
+                            bail!(BitcodeError::MissingArgValue(
+                                orig_compiler_cmd.into(),
+                                orig_args.to_vec(),
+                                arg.clone()));
                         }
                     }
                 }
