@@ -90,7 +90,9 @@ fn zlib_do_build() -> anyhow::Result<(TempDir, String, PathBuf)> {
 }
 
 fn get_llvm_str(bc_file: &Path) -> anyhow::Result<String> {
-    Cmd::new("llvm-dis").arg(bc_file).run().context("Disassembling")?;
+    Cmd::new(PathBuf::from(common::user_llvm_dis_cmd()
+                           .unwrap_or("llvm-dis".to_string())))
+        .arg(bc_file).run().context("Disassembling")?;
     let mut ll_path = PathBuf::from(bc_file);
     ll_path.set_extension("ll");
     let mut ll = String::new();
