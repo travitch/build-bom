@@ -34,7 +34,7 @@ pub struct ExtractOptions {
     pub verbose : Vec<bool>,
 }
 
-#[derive(Debug,StructOpt)]
+#[derive(Clone,Debug,StructOpt)]
 pub struct BitcodeOptions {
     #[structopt(long="clang", help="Name of the clang binary to use to generate bitcode (default: `clang`)")]
     pub clang_path : Option<PathBuf>,

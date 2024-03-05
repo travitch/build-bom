@@ -17,4 +17,4 @@ jobs:
       - name: test
         # Note: individual tests will change directory to run in specific
         # locations, so they must be run consecutively (--test-threads=1).
-        run: CLANG=clang-12 LLVM_LINK=llvm-link-12 cargo test -- --test-threads=1
+        run: CLANG=clang-12 LLVM_LINK=llvm-link-12 LLVM_DIS=llvm-dis-12 cargo test -- --test-threads=1
