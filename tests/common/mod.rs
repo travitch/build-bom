@@ -9,14 +9,14 @@ pub static SOURCE_DIR: &'static str = "tests/sources";
 //
 // If the user did not provide one, just return None, which is interpreted by build-bom as 'clang'
 pub fn user_clang_cmd() -> Option<PathBuf> {
-    std::env::var("CLANG").map(|s| { let mut p = std::path::PathBuf::new(); p.push(s); p }).ok()
+    std::env::var("CLANG").ok().map(PathBuf::from)
 }
 
 // Get the user-provided llvm-link command (via the LLVM_LINK environment variable), if any
 //
 // If the user did not provide one, return None, which build-bom interprets as 'llvm-link'
-pub fn user_llvm_link_cmd() -> Option<String> {
-    std::env::var("LLVM_LINK").ok()
+pub fn user_llvm_link_cmd() -> Option<PathBuf> {
+    std::env::var("LLVM_LINK").ok().map(PathBuf::from)
 }
 
 // Get the user-provided llvm-dis command (via the LLVM_DIS environment variable), if any

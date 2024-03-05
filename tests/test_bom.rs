@@ -160,6 +160,7 @@ fn test_no_compile_only() -> anyhow::Result<()> {
               common::user_clang_cmd());
     let cmd_opts = vec![String::from("make")];
     let gen_opts = BitcodeOptions { clang_path: common::user_clang_cmd(),
+                                    objcopy_path: None,
                                     bcout_path: None,
                                     suppress_automatic_debug: false,
                                     inject_arguments: Vec::new(),
@@ -181,6 +182,7 @@ fn test_no_compile_only() -> anyhow::Result<()> {
     let extract_opts = ExtractOptions { input: exe_path,
                                         output: bc_path,
                                         llvm_link_path: common::user_llvm_link_cmd(),
+                                        objcopy_path: None,
                                         verbose: vec![] };
     common::extract_bitcode(extract_opts)?;
     eprintln!("## bitcode extracted");
@@ -217,6 +219,7 @@ fn test_blddir() -> anyhow::Result<()> {
               common::user_clang_cmd());
     let cmd_opts = vec![String::from("make")];
     let gen_opts = BitcodeOptions { clang_path: common::user_clang_cmd(),
+                                    objcopy_path: None,
                                     bcout_path: None,
                                     suppress_automatic_debug: false,
                                     inject_arguments: Vec::new(),
@@ -241,6 +244,7 @@ fn test_blddir() -> anyhow::Result<()> {
     let extract_opts = ExtractOptions { input: exe_path,
                                         output: bc_path,
                                         llvm_link_path: common::user_llvm_link_cmd(),
+                                        objcopy_path: None,
                                         verbose: vec![true] };
     common::extract_bitcode(extract_opts)?;
     eprintln!("## bitcode extracted");

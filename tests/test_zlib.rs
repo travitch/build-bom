@@ -71,6 +71,7 @@ fn zlib_do_build() -> anyhow::Result<(TempDir, String, PathBuf)> {
 
     let cmd_opts = vec![String::from("make")];
     let gen_opts = BitcodeOptions { clang_path: common::user_clang_cmd(),
+                                    objcopy_path: None,
                                     bcout_path: None,
                                     suppress_automatic_debug: false,
                                     inject_arguments: Vec::new(),
@@ -112,6 +113,7 @@ fn test_zlib_sharedlib() -> anyhow::Result<()> {
     let extract_opts = ExtractOptions { input: so_path,
                                         output: bc_path,
                                         llvm_link_path: common::user_llvm_link_cmd(),
+                                        objcopy_path: None,
                                         verbose: vec![true, true]};
     common::extract_bitcode(extract_opts)?;
 
@@ -141,6 +143,7 @@ fn test_zlib_staticlib() -> anyhow::Result<()> {
     let extract_opts = ExtractOptions { input: lib_path,
                                         output: bc_path,
                                         llvm_link_path: common::user_llvm_link_cmd(),
+                                        objcopy_path: None,
                                         verbose: vec![true, true]};
     common::extract_bitcode(extract_opts)?;
 
@@ -184,6 +187,7 @@ fn test_zlib_exe_static() -> anyhow::Result<()> {
     let extract_opts = ExtractOptions { input: exe_path,
                                         output: bc_path,
                                         llvm_link_path: common::user_llvm_link_cmd(),
+                                        objcopy_path: None,
                                         verbose: vec![true, true]};
     common::extract_bitcode(extract_opts)?;
 
@@ -218,6 +222,7 @@ fn test_zlib_exe_sharedlib() -> anyhow::Result<()> {
     let extract_opts = ExtractOptions { input: exe_path,
                                         output: bc_path,
                                         llvm_link_path: common::user_llvm_link_cmd(),
+                                        objcopy_path: None,
                                         verbose: vec![true, true]};
     common::extract_bitcode(extract_opts)?;
 
@@ -266,6 +271,7 @@ fn test_zlib_exe_modified() -> anyhow::Result<()> {
         // via build-bom to ensure it is up-to-date before making any changes.
         let cmd_opts = vec![String::from("make")];
         let gen_opts = BitcodeOptions { clang_path: common::user_clang_cmd(),
+                                        objcopy_path: None,
                                         bcout_path: None,
                                         suppress_automatic_debug: false,
                                         inject_arguments: Vec::new(),
@@ -303,6 +309,7 @@ fn test_zlib_exe_modified() -> anyhow::Result<()> {
         let extract_opts = ExtractOptions { input: exe_path,
                                             output: bc_path,
                                             llvm_link_path: common::user_llvm_link_cmd(),
+                                            objcopy_path: None,
                                             verbose: vec![true, true]};
         common::extract_bitcode(extract_opts)?;
 

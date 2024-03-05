@@ -90,11 +90,12 @@ use std::thread;
 use sha2::{Digest,Sha256};
 use thiserror::Error;
 use chainsop::{ChainedOps, Executable, ExeFileSpec, OpInterface,
-               FileArg, FilesPrep, FunctionOperation, SubProcOperation,OsRun};
+               FileArg, FilesPrep, FunctionOperation, OsRun};
 
 use crate::bom::options::{BitcodeOptions, get_executor};
 use crate::bom::syscalls::load_syscalls;
 use crate::bom::event::RawString;
+use crate::bom::executables::{run, CLANG_LLVM};
 use crate::bom::proc_read::{read_str_from,read_str_list_from,read_environment,read_cwd};
 use crate::bom::clang_support;
 
@@ -110,7 +111,9 @@ pub enum TracerError {
 #[derive(Clone)]
 struct BCOpts<'a,  Exec: OsRun> {
     /// The clang command to use to generate bitcode
-    clang_path : &'a OsString,
+    clang_path : &'a Option<PathBuf>,
+    /// The objcopy command to use to generate bitcode
+    objcopy_path : &'a Option<PathBuf>,
     /// The directory to store generated bitcode in
     bitcode_directory : &'a Option<&'a PathBuf>,
     /// If true, do *not* force the generation of debug information
@@ -166,8 +169,8 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
     let remove_rx = RegexSet::new(rx_strs)?;
 
     let verbosity = bitcode_options.verbose.len();
-    let bc_opts = BCOpts { clang_path : &bitcode_options.clang_path.as_ref().map(|s| OsString::from(s.as_path().as_os_str()))
-                                                        .unwrap_or(OsString::from("clang")),
+    let bc_opts = BCOpts { clang_path : &bitcode_options.clang_path,
+                           objcopy_path : &bitcode_options.objcopy_path,
                            bitcode_directory : &bitcode_options.bcout_path.as_ref(),
                            suppress_automatic_debug : bitcode_options.suppress_automatic_debug,
                            inject_arguments : &bitcode_options.inject_arguments,
@@ -249,14 +252,8 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
 {
     let mut orig_target = None;
 
-    let mut bcgen_op = ops.push_op(
-        &SubProcOperation::new(&Executable::new(bc_opts.clang_path,
-                                                ExeFileSpec::Append,
-                                                ExeFileSpec::option("-o")))
-            .set_label("clang:emit-llvm")
-            // Emit llvm bitcode, which is a compile-only operation
-            .push_arg("-emit-llvm")
-            .push_arg("-c"));
+    let mut bcgen_op = ops.push_op(&run(&*CLANG_LLVM, bc_opts.clang_path)
+                                   .set_label("clang:emit-llvm"));
 
     // Force debug information (unless directed not to)
     if !bc_opts.suppress_automatic_debug {
@@ -307,7 +304,7 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
                 match it.next() {
                     None => {
                         bail!(BitcodeError::MissingOutputFile(
-                            Path::new(&bc_opts.clang_path).to_path_buf(),
+                            bc_opts.clang_path.clone().unwrap_or("clang".into()),
                             Vec::from(orig_args)));
                     }
                     Some(target) => {
@@ -365,7 +362,7 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
                 Err(msg) => {
                     let _res = chan.send(
                         Some(Event::MultipleInputsWithImplicitOutput(
-                            bc_opts.clang_path.to_os_string(),
+                            bc_opts.clang_path.clone().unwrap_or("clang".into()).into(),
                             orig_args.to_vec())));
                     Err(anyhow::Error::new(msg))
                 }
@@ -404,10 +401,10 @@ fn build_bitcode_compile_only(chan : &mut mpsc::Sender<Option<Event>>,
 
         // Inserts the tarfile into the ELF object file as a new named section
         bitcode_ops.push_op(
-            &SubProcOperation::new(
-                &Executable::new("objcopy",
-                                 ExeFileSpec::option(&format!("{}=", ELF_SECTION_NAME)),
-                                 ExeFileSpec::Append))
+            &run(&Executable::new("objcopy",
+                                  ExeFileSpec::option(&format!("{}=", ELF_SECTION_NAME)),
+                                  ExeFileSpec::Append),
+                 &bc_opts.objcopy_path)
                 .push_arg("--add-section"));
 
         match bitcode_ops.execute(&bc_opts.executor, &Some(cwd)) {
@@ -1175,7 +1172,8 @@ mod tests {
         bcdir.push("path");
         bcdir.push("to");
         bcdir.push("bitcode");
-        let bcopts = BCOpts { clang_path: &"/path/to/clang".into(),
+        let bcopts = BCOpts { clang_path: &Some("/path/to/clang".into()),
+                              objcopy_path: &None,
                               bitcode_directory: &Some(&bcdir),
                               suppress_automatic_debug: false,
                               inject_arguments: &Vec::from(
