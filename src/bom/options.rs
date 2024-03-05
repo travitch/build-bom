@@ -29,7 +29,9 @@ pub struct ExtractOptions {
     #[structopt(short="o", long="output", help="The file to save the resulting bitcode file to")]
     pub output : PathBuf,
     #[structopt(long="llvm-link-path", help="The path to the llvm-link tool (possibly version suffixed)")]
-    pub llvm_link_path : Option<String>,
+    pub llvm_link_path : Option<PathBuf>,
+    #[structopt(long="objcopy-path", help="The path to the objcopy tool (possibly version suffixed)")]
+    pub objcopy_path : Option<PathBuf>,
     #[structopt(short="v", long="verbose", help="Generate verbose output.  Twice for additional verbosity.")]
     pub verbose : Vec<bool>,
 }
@@ -38,6 +40,8 @@ pub struct ExtractOptions {
 pub struct BitcodeOptions {
     #[structopt(long="clang", help="Name of the clang binary to use to generate bitcode (default: `clang`)")]
     pub clang_path : Option<PathBuf>,
+    #[structopt(long="objcopy-path", help="The path to the objcopy tool (possibly version suffixed)")]
+    pub objcopy_path : Option<PathBuf>,
     #[structopt(short="b", long="bc-out", help="Directory to place LLVM bitcode (bc) output data.  The default is to place it next to the object file, but it must be accessible by a subsequent Extract operation and some build tools build in a temporary directory that is disposed of at the end of the build (e.g. CMake) ")]
     pub bcout_path : Option<PathBuf>,
     #[structopt(short="v", long="verbose", help="Generate verbose output. Twice for additional verbosity.")]

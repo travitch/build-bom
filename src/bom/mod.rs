@@ -7,6 +7,7 @@ pub mod versioning;
 pub mod bitcode;
 pub mod loader;
 pub mod deptree;
+pub mod executables;
 pub mod extract;
 pub mod proc_read;
 pub mod clang_support;

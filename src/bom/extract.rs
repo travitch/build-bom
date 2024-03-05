@@ -2,10 +2,11 @@ use log::{info};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use chainsop::{ChainedOps, Executable, ExeFileSpec, OpInterface,
-               FileArg, FilesPrep, SubProcOperation};
+               FileArg, FilesPrep};
 
 use crate::bom::options::{ExtractOptions, get_executor};
 use crate::bom::bitcode::ELF_SECTION_NAME;
+use crate::bom::executables::{run, TAR_EXTRACT, LLVM_LINK};
 
 #[derive(thiserror::Error,Debug)]
 pub enum ExtractError {
@@ -69,9 +70,8 @@ pub fn do_bitcode_extraction(extract_options : &ExtractOptions,
     dummy_output.push("discard{output-file}");  // arbitrary name
 
     extract_ops.push_op(
-        &SubProcOperation::new(&Executable::new("objcopy",
-                                                ExeFileSpec::Append,
-                                                ExeFileSpec::Append))
+        &run(&Executable::new("objcopy", ExeFileSpec::Append, ExeFileSpec::Append),
+             &extract_options.objcopy_path)
             .set_label("objcopy:extract-bitcode")
             .push_arg("--dump-section")
             .push_arg(format!("{}={}", ELF_SECTION_NAME, ok_tar_name))
@@ -85,29 +85,19 @@ pub fn do_bitcode_extraction(extract_options : &ExtractOptions,
     // NOTE: Ideally, we would be able to use the tar library for this instead
     // of calling out to tar.
 
-    extract_ops.push_op(
-        &SubProcOperation::new(
-            &Executable::new("tar",
-                             ExeFileSpec::Append,
-                             ExeFileSpec::NoFileUsed))
-            .set_label("tar:unpack")
-            .push_arg("xif")
-            .set_dir(tmp_path)  // Extracted files will be placed here
-            // Input here is explicitly the section dump target file rather
-            // than the output of the previous op.
-            .set_input_file(&FileArg::loc(tar_path))
-    );
+    extract_ops.push_op(&run(&TAR_EXTRACT, &None)
+                        .set_label("tar:unpack")
+                        .set_dir(tmp_path)  // Extracted files will be placed here
+                        // Input here is explicitly the section dump target file
+                        // rather than the output of the previous op.
+                        .set_input_file(&FileArg::loc(tar_path)));
 
     // Now all the files extracted from bitcode.tar into tmp_dir should be linked
     // together to create the final bitcode file.
 
-    let linker = String::from(extract_options.llvm_link_path
-                              .as_ref().unwrap_or(&"llvm-link"
-                                                  .to_string()));
     let mut link_bc_files = extract_ops.push_op(
-        &SubProcOperation::new(&Executable::new(&linker,
-                                                ExeFileSpec::Append,
-                                                ExeFileSpec::option("-o"))));
+        &run(&*LLVM_LINK, &extract_options.llvm_link_path));
+
     link_bc_files.set_input_file(&FileArg::glob_in(tmp_path, "*.bc"));
 
     let executor = get_executor(extract_options.verbose.len());
