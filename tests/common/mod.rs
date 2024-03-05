@@ -22,7 +22,7 @@ pub fn user_llvm_link_cmd() -> Option<String> {
 // Get the user-provided llvm-dis command (via the LLVM_DIS environment variable), if any
 //
 // If the user did not provide one, return None, which build-bom interprets as 'llvm-dis'
-#[allow(dead_code)]
+#[allow(dead_code)] // used in some test crates (test_zlib), but not others (test_bom)
 pub fn user_llvm_dis_cmd() -> PathBuf {
     PathBuf::from(std::env::var("LLVM_DIS").ok().unwrap_or("llvm-dis".to_string()))
 }
