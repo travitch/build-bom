@@ -1,4 +1,5 @@
 use fs_extra::dir::{copy,CopyOptions};
+use serial_test::serial;  // for tests that change directories
 use std::ffi::OsStr;
 use std::path::{Path};
 use std::env;
@@ -133,6 +134,7 @@ fn test_blacklist() -> anyhow::Result<()> {
 
 
 #[test]
+#[serial]
 fn test_no_compile_only() -> anyhow::Result<()> {
     // This test builds an executable without the -c flag; we want to make sure
     // that build-bom can recognize that and do something reasonable
@@ -187,6 +189,7 @@ fn test_no_compile_only() -> anyhow::Result<()> {
 }
 
 #[test]
+#[serial]
 fn test_blddir() -> anyhow::Result<()> {
     // This test creates a separate build directory and executes all build
     // operations from that directory, using relative paths to the original

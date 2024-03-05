@@ -1,5 +1,6 @@
 use anyhow::Context;
 use fs_extra::dir::{copy,CopyOptions};
+use serial_test::serial;  // for tests that change directories
 use std::fs::File;
 use std::io::Read;
 use std::path::{PathBuf, Path};
@@ -101,6 +102,7 @@ fn get_llvm_str(bc_file: &Path) -> anyhow::Result<String> {
 }
 
 #[test]
+#[serial]
 fn test_zlib_sharedlib() -> anyhow::Result<()> {
     let ZlibBld { ref tdir, ref zlib_version, ref tgt_path } = *ZLIB_BLD;
     let mut so_path = tgt_path.clone();
@@ -129,6 +131,7 @@ fn test_zlib_sharedlib() -> anyhow::Result<()> {
 }
 
 #[test]
+#[serial]
 fn test_zlib_staticlib() -> anyhow::Result<()> {
     let ZlibBld { ref tdir, ref tgt_path, .. } = *ZLIB_BLD;
     let mut lib_path = tgt_path.clone();
@@ -171,6 +174,7 @@ fn test_zlib_staticlib() -> anyhow::Result<()> {
 }
 
 #[test]
+#[serial]
 fn test_zlib_exe_staticlib() -> anyhow::Result<()> {
     let ZlibBld { ref tdir, ref tgt_path, .. } = *ZLIB_BLD;
     let mut exe_path = tgt_path.clone();
@@ -204,6 +208,7 @@ fn test_zlib_exe_staticlib() -> anyhow::Result<()> {
 }
 
 #[test]
+#[serial]
 fn test_zlib_exe_sharedlib() -> anyhow::Result<()> {
     let ZlibBld { ref tdir, ref tgt_path, .. } = *ZLIB_BLD;
     let mut exe_path = tgt_path.clone();
@@ -237,6 +242,7 @@ fn test_zlib_exe_sharedlib() -> anyhow::Result<()> {
 }
 
 #[test]
+#[serial]
 fn test_zlib_exe_modified() -> anyhow::Result<()> {
     // In this test, one of the files that is part of the static library is
     // modified, and the library is rebuilt *without* using build-bom.  Then the
@@ -256,18 +262,14 @@ fn test_zlib_exe_modified() -> anyhow::Result<()> {
         cpopts.content_only = true;
         copy(tgt_path, my_tgt_path, &cpopts)?;
 
-        let mut exe_path = PathBuf::from(my_tgt_path);
-        exe_path.push("example64");
-        assert!(exe_path.exists());  // build successfully generated a static executable
-
-        Cmd::new("sed").arg("-ie").arg("s,Copyright,COPYRIGHT,")
-            .arg(my_tgt_path.join("gzread.c"))
-            .run()?;
-        Cmd::new("make").arg("-C").arg(my_tgt_path)
-            .arg("-f").arg("Makefile.in").arg("libz.a").run()?;
+        // While the above copy is intended to preserve the file timestamps, it
+        // is not always guaranteed that there will be enough system time
+        // resolution to preserve the "make finished" status, so re-run the build
+        // via build-bom to ensure it is up-to-date before making any changes.
         let cmd_opts = vec![String::from("make"),
-                            "-C".to_string(),
-                            String::from(my_tgt_path.to_str().unwrap())];
+                            // "-C".to_string(),
+                            // String::from(my_tgt_path.to_str().unwrap())
+            ];
         let gen_opts = BitcodeOptions { clang_path: common::user_clang_cmd(),
                                         bcout_path: None,
                                         suppress_automatic_debug: false,
@@ -277,7 +279,27 @@ fn test_zlib_exe_modified() -> anyhow::Result<()> {
                                         strict: false,
                                         command: cmd_opts,
                                         any_fail: false };
-        common::gen_bitcode(gen_opts)?;
+        {
+            let _push2 = pushd(my_tgt_path)?;
+            common::gen_bitcode(gen_opts.clone())?;
+        }
+
+        let mut exe_path = PathBuf::from(my_tgt_path);
+        exe_path.push("example64");
+        assert!(exe_path.exists());  // build successfully generated a static executable
+
+        // Now make specific changes and rebuild *without* build-bom
+        Cmd::new("sed").arg("-ie").arg("s,Copyright,COPYRIGHT,")
+            .arg(my_tgt_path.join("gzread.c"))
+            .run()?;
+        Cmd::new("make").arg("-C").arg(my_tgt_path)
+            .arg("-f").arg("Makefile.in").arg("libz.a").run()?;
+
+        // And finally, build the remaining parts with build-bom
+        {
+            let _push2 = pushd(my_tgt_path)?;
+            common::gen_bitcode(gen_opts)?;
+        }
         assert!(exe_path.exists());  // build successfully generated a static executable
 
         let mut bc_path = PathBuf::from(my_tgt_path);

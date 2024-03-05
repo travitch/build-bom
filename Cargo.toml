@@ -42,3 +42,4 @@ chainsop = { git = "https://github.com/kquick/chainsop.git" }
 [dev-dependencies]
 xshell = "0.1"
 fs_extra = "^1.2"
+serial_test = "0.4"
