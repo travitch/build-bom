@@ -23,8 +23,8 @@ pub fn user_llvm_link_cmd() -> Option<String> {
 //
 // If the user did not provide one, return None, which build-bom interprets as 'llvm-dis'
 #[allow(dead_code)]
-pub fn user_llvm_dis_cmd() -> Option<String> {
-    std::env::var("LLVM_DIS").ok()
+pub fn user_llvm_dis_cmd() -> PathBuf {
+    PathBuf::from(std::env::var("LLVM_DIS").ok().unwrap_or("llvm-dis".to_string()))
 }
 
 pub fn gen_bitcode(gen_opts : BitcodeOptions) -> anyhow::Result<()> {

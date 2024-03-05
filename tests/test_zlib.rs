@@ -36,7 +36,6 @@ fn fetch_if_needed(url : &str, filename : &str) -> anyhow::Result<PathBuf> {
 }
 
 
-#[allow(dead_code)]  // tdir is holding a resource, but never directly used
 struct ZlibBld {
     tdir: TempDir,
     tgt_path: PathBuf,
@@ -91,9 +90,8 @@ fn zlib_do_build() -> anyhow::Result<(TempDir, String, PathBuf)> {
 }
 
 fn get_llvm_str(bc_file: &Path) -> anyhow::Result<String> {
-    Cmd::new(PathBuf::from(common::user_llvm_dis_cmd()
-                           .unwrap_or("llvm-dis".to_string())))
-        .arg(bc_file).run().context("Disassembling")?;
+    Cmd::new(common::user_llvm_dis_cmd()).arg(bc_file).run()
+        .context("Disassembling")?;
     let mut ll_path = PathBuf::from(bc_file);
     ll_path.set_extension("ll");
     let mut ll = String::new();
@@ -107,7 +105,7 @@ fn test_zlib_sharedlib() -> anyhow::Result<()> {
     let ZlibBld { ref tdir, ref zlib_version, ref tgt_path } = *ZLIB_BLD;
     let mut so_path = tgt_path.clone();
     so_path.push(format!("libz.so.{}", zlib_version));
-    assert!(so_path.exists());  // build successfully generated a shared lib
+    assert!(so_path.exists(), "build did not successfully generate a shared library");
     let mut bc_path = tgt_path.clone();
     bc_path.push(format!("libz.so.{}.bc", zlib_version));
     let bc_path2 = bc_path.clone();
@@ -126,7 +124,7 @@ fn test_zlib_sharedlib() -> anyhow::Result<()> {
     assert!(ll.contains("deflateSetHeader"), "missing contents from deflate.c");
     assert!(ll.contains("gzfread"), "missing contents from gzread.c");
     assert!(ll.contains("gzfwrite"), "missing contents from gzwrite.c");
-    assert!(tdir.path().exists()); // ensure tempdir lasts until here
+    assert!(tdir.path().exists(), "tempdir still exists");
     Ok(())
 }
 
@@ -136,7 +134,7 @@ fn test_zlib_staticlib() -> anyhow::Result<()> {
     let ZlibBld { ref tdir, ref tgt_path, .. } = *ZLIB_BLD;
     let mut lib_path = tgt_path.clone();
     lib_path.push("libz.a");
-    assert!(lib_path.exists());  // build successfully generated a static lib
+    assert!(lib_path.exists(), "build did not successfully generate a static library");
     let mut bc_path = tgt_path.clone();
     bc_path.push("libz.bc");
     let bc_path2 = bc_path.clone();
@@ -169,17 +167,17 @@ fn test_zlib_staticlib() -> anyhow::Result<()> {
         ll.contains("gzfwrite"),
     ];
     assert_eq!(fnd, vec![false, false, false, false, true]);
-    assert!(tdir.path().exists()); // ensure tempdir lasts until here
+    assert!(tdir.path().exists(), "tempdir still exists");
     Ok(())
 }
 
 #[test]
 #[serial]
-fn test_zlib_exe_staticlib() -> anyhow::Result<()> {
+fn test_zlib_exe_static() -> anyhow::Result<()> {
     let ZlibBld { ref tdir, ref tgt_path, .. } = *ZLIB_BLD;
     let mut exe_path = tgt_path.clone();
     exe_path.push("example64");
-    assert!(exe_path.exists());  // build successfully generated a static executable
+    assert!(exe_path.exists(), "build did not successfully generate a static executable");
     let mut bc_path = tgt_path.clone();
     bc_path.push("example64.bc");
     let bc_path2 = bc_path.clone();
@@ -203,7 +201,7 @@ fn test_zlib_exe_staticlib() -> anyhow::Result<()> {
         ll.contains("test_gzio"),  // exe src
     ];
     assert_eq!(fnd, vec![true, true, true, true, true, true]);
-    assert!(tdir.path().exists()); // ensure tempdir lasts until here
+    assert!(tdir.path().exists(), "tempdir still exists");
     Ok(())
 }
 
@@ -213,7 +211,7 @@ fn test_zlib_exe_sharedlib() -> anyhow::Result<()> {
     let ZlibBld { ref tdir, ref tgt_path, .. } = *ZLIB_BLD;
     let mut exe_path = tgt_path.clone();
     exe_path.push("examplesh");
-    assert!(exe_path.exists());  // build successfully generated a shared executable
+    assert!(exe_path.exists(), "build did not successfully generate a shared executable");
     let mut bc_path = tgt_path.clone();
     bc_path.push("examplesh.bc");
     let bc_path2 = bc_path.clone();
@@ -237,7 +235,7 @@ fn test_zlib_exe_sharedlib() -> anyhow::Result<()> {
         ll.contains("test_gzio"),  // exe src
     ];
     assert_eq!(fnd, vec![false, false, false, false, false, true]);
-    assert!(tdir.path().exists()); // ensure tempdir lasts until here
+    assert!(tdir.path().exists(), "tempdir still exists");
     Ok(())
 }
 
@@ -266,10 +264,7 @@ fn test_zlib_exe_modified() -> anyhow::Result<()> {
         // is not always guaranteed that there will be enough system time
         // resolution to preserve the "make finished" status, so re-run the build
         // via build-bom to ensure it is up-to-date before making any changes.
-        let cmd_opts = vec![String::from("make"),
-                            // "-C".to_string(),
-                            // String::from(my_tgt_path.to_str().unwrap())
-            ];
+        let cmd_opts = vec![String::from("make")];
         let gen_opts = BitcodeOptions { clang_path: common::user_clang_cmd(),
                                         bcout_path: None,
                                         suppress_automatic_debug: false,
@@ -286,7 +281,7 @@ fn test_zlib_exe_modified() -> anyhow::Result<()> {
 
         let mut exe_path = PathBuf::from(my_tgt_path);
         exe_path.push("example64");
-        assert!(exe_path.exists());  // build successfully generated a static executable
+        assert!(exe_path.exists(), "build did not successfully generate a static executable");
 
         // Now make specific changes and rebuild *without* build-bom
         Cmd::new("sed").arg("-ie").arg("s,Copyright,COPYRIGHT,")
@@ -300,7 +295,7 @@ fn test_zlib_exe_modified() -> anyhow::Result<()> {
             let _push2 = pushd(my_tgt_path)?;
             common::gen_bitcode(gen_opts)?;
         }
-        assert!(exe_path.exists());  // build successfully generated a static executable
+        assert!(exe_path.exists(), "build did not successfully regenerate a static executable");
 
         let mut bc_path = PathBuf::from(my_tgt_path);
         bc_path.push("example64.bc");
@@ -326,6 +321,6 @@ fn test_zlib_exe_modified() -> anyhow::Result<()> {
         ];
         assert_eq!(fnd, vec![true, true, true, false, true, true]);
     }
-    assert!(tdir.path().exists()); // ensure tempdir lasts until here
+    assert!(tdir.path().exists(), "tempdir still exists");
     Ok(())
 }
