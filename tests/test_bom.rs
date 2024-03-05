@@ -1,62 +1,19 @@
 use fs_extra::dir::{copy,CopyOptions};
 use std::ffi::OsStr;
-use std::path::{PathBuf, Path};
+use std::path::{Path};
 use std::env;
 use tempfile::tempdir;
-use xshell::{Cmd, pushd};
+use xshell::{pushd};
 
 use bom;
-use bom::bom::options::{Options,Subcommand,BitcodeOptions,ExtractOptions};
+use bom::bom::options::{BitcodeOptions,ExtractOptions};
 use bom::bom::clang_support::{is_compile_command_name,
                               is_option_arg,
                               next_arg_is_option_value,
                               is_blacklisted_clang_argument};
 
+mod common;
 
-static SOURCE_DIR: &'static str = "tests/sources";
-
-// Download the file at the given URL to [tests/sources/<filename>] if it
-// doesn't already exist, returning the canonical absolute path to that file.
-fn fetch_if_needed(url : &str, filename : &str) -> anyhow::Result<PathBuf> {
-    let path = Path::new(SOURCE_DIR).join(filename);
-    if !path.exists() {
-        let cmd = Cmd::new("wget").arg("-O").arg(path.as_path()).arg(url);
-        cmd.run()?;
-    }
-
-    let abs_path = std::fs::canonicalize(path.as_path())?;
-    Ok(abs_path)
-}
-
-// Get the clang command provided by the user (via the CLANG environment variable), if any
-//
-// If the user did not provide one, just return None, which is interpreted by build-bom as 'clang'
-fn user_clang_cmd() -> Option<PathBuf> {
-    std::env::var("CLANG").map(|s| { let mut p = std::path::PathBuf::new(); p.push(s); p }).ok()
-}
-
-// Get the user-provided llvm-link command (via the LLVM_LINK environment variable), if any
-//
-// If the user did not provide one, return None, which build-bom interprets as 'llvm-link'
-fn user_llvm_link_cmd() -> Option<String> {
-    std::env::var("LLVM_LINK").ok()
-}
-
-fn gen_bitcode(gen_opts : BitcodeOptions) -> anyhow::Result<()> {
-    let gen_cmd = Subcommand::GenerateBitcode(gen_opts);
-    let gen_opt = Options { subcommand: gen_cmd };
-    let rc = bom::run_bom_command(gen_opt)?;
-    assert_eq!(rc, 0);
-    Ok(())
-}
-
-fn extract_bitcode(extract_opts : ExtractOptions) -> anyhow::Result<()> {
-    let extract_cmd = Subcommand::ExtractBitcode(extract_opts);
-    let extract_opt = Options { subcommand: extract_cmd };
-    let rc = bom::run_bom_command(extract_opt)?;
-    assert_eq!(rc, 0);
-    Ok(())
-}
 
 #[test]
 fn test_is_compile_cmd() -> anyhow::Result<()> {
@@ -176,54 +133,10 @@ fn test_blacklist() -> anyhow::Result<()> {
 
 
 #[test]
-fn test_zlib() -> anyhow::Result<()> {
-    let url = "https://www.zlib.net/current/zlib.tar.gz";
-    let filename = "zlib.tar.gz";
-    let abs_src = fetch_if_needed(url, filename)?;
-
-    let tdir = tempdir()?;
-    let _push1 = pushd(tdir.path())?;
-    let tar = Cmd::new("tar").arg("xf").arg(abs_src);
-    tar.run()?;
-    let dir_name = &glob::glob("zlib-*")?.filter_map(Result::ok).collect::<Vec<PathBuf>>()[0];
-    let zlib_version = &dir_name.to_str().unwrap()["zlib-".len()..];
-    let _push2 = pushd(dir_name)?;
-    let conf = Cmd::new("bash").arg("configure");
-    conf.run()?;
-
-    let cmd_opts = vec![String::from("make")];
-    let gen_opts = BitcodeOptions { clang_path: user_clang_cmd(),
-                                    bcout_path: None,
-                                    suppress_automatic_debug: false,
-                                    inject_arguments: Vec::new(),
-                                    remove_arguments: Vec::new(),
-                                    verbose: vec![true, true],
-                                    strict: false,
-                                    command: cmd_opts,
-                                    any_fail: false };
-    // n.b. any_fail must be false because zlib runs autoconf/configure and the
-    // failures there are tallied and cause build-bom to exit with a failure.
-    gen_bitcode(gen_opts)?;
-
-    let mut so_path = std::path::PathBuf::new();
-    so_path.push(format!("libz.so.{}", zlib_version));
-    let mut bc_path = std::path::PathBuf::new();
-    bc_path.push(format!("libz.so.{}.bc", zlib_version));
-    let bc_path2 = bc_path.clone();
-    let extract_opts = ExtractOptions { input: so_path,
-                                        output: bc_path,
-                                        llvm_link_path: user_llvm_link_cmd(),
-                                        verbose: vec![true, true]};
-    extract_bitcode(extract_opts)?;
-    assert!(bc_path2.exists());
-    Ok(())
-}
-
-#[test]
 fn test_no_compile_only() -> anyhow::Result<()> {
     // This test builds an executable without the -c flag; we want to make sure
     // that build-bom can recognize that and do something reasonable
-    let path = Path::new(SOURCE_DIR).join("no_compile_only");
+    let path = Path::new(common::SOURCE_DIR).join("no_compile_only");
     eprintln!("## Canonicalizing input: {:?} (from {:?})", path, env::current_dir());
     let abs_path = match std::fs::canonicalize(path.as_path()) {
         Ok(p) => p,
@@ -241,9 +154,10 @@ fn test_no_compile_only() -> anyhow::Result<()> {
     copy(abs_path, ".", &options)?;
     let _push2 = pushd("no_compile_only")?;
 
-    eprintln!("## build-bom generate bitcode via make and clang at {:?}", user_clang_cmd());
+    eprintln!("## build-bom generate bitcode via make and clang at {:?}",
+              common::user_clang_cmd());
     let cmd_opts = vec![String::from("make")];
-    let gen_opts = BitcodeOptions { clang_path: user_clang_cmd(),
+    let gen_opts = BitcodeOptions { clang_path: common::user_clang_cmd(),
                                     bcout_path: None,
                                     suppress_automatic_debug: false,
                                     inject_arguments: Vec::new(),
@@ -252,7 +166,7 @@ fn test_no_compile_only() -> anyhow::Result<()> {
                                     strict: false,
                                     command: cmd_opts,
                                     any_fail: true };
-    gen_bitcode(gen_opts)?;
+    common::gen_bitcode(gen_opts)?;
     eprintln!("## bitcode generation complete");
 
     let mut exe_path = std::path::PathBuf::new();
@@ -261,12 +175,12 @@ fn test_no_compile_only() -> anyhow::Result<()> {
     bc_path.push("hello-world.bc");
     let bc_path2 = bc_path.clone();
     eprintln!("## extract bitcode from {:?} to {:?} using llvm-link at {:?}",
-              exe_path, bc_path, user_llvm_link_cmd());
+              exe_path, bc_path, common::user_llvm_link_cmd());
     let extract_opts = ExtractOptions { input: exe_path,
                                         output: bc_path,
-                                        llvm_link_path: user_llvm_link_cmd(),
+                                        llvm_link_path: common::user_llvm_link_cmd(),
                                         verbose: vec![] };
-    extract_bitcode(extract_opts)?;
+    common::extract_bitcode(extract_opts)?;
     eprintln!("## bitcode extracted");
     assert!(bc_path2.exists());
     Ok(())
@@ -277,7 +191,7 @@ fn test_blddir() -> anyhow::Result<()> {
     // This test creates a separate build directory and executes all build
     // operations from that directory, using relative paths to the original
     // source locations.
-    let path = Path::new(SOURCE_DIR).join("blddir_test");
+    let path = Path::new(common::SOURCE_DIR).join("blddir_test");
     eprintln!("## Canonicalizing input: {:?} (from {:?})", path, env::current_dir());
     let abs_path = match std::fs::canonicalize(path.as_path()) {
         Ok(p) => p,
@@ -296,9 +210,10 @@ fn test_blddir() -> anyhow::Result<()> {
     copy(abs_path, ".", &options)?;
     let _push2 = pushd("blddir_test")?;
 
-    eprintln!("## build-bom generate bitcode via make and clang at {:?}", user_clang_cmd());
+    eprintln!("## build-bom generate bitcode via make and clang at {:?}",
+              common::user_clang_cmd());
     let cmd_opts = vec![String::from("make")];
-    let gen_opts = BitcodeOptions { clang_path: user_clang_cmd(),
+    let gen_opts = BitcodeOptions { clang_path: common::user_clang_cmd(),
                                     bcout_path: None,
                                     suppress_automatic_debug: false,
                                     inject_arguments: Vec::new(),
@@ -308,7 +223,7 @@ fn test_blddir() -> anyhow::Result<()> {
                                     // preproc_native: true,
                                     command: cmd_opts,
                                     any_fail : true };
-    gen_bitcode(gen_opts)?;
+    common::gen_bitcode(gen_opts)?;
     eprintln!("## bitcode generation complete");
 
     let mut exe_path = std::path::PathBuf::new();
@@ -319,12 +234,12 @@ fn test_blddir() -> anyhow::Result<()> {
     bc_path.push("hello-world.bc");
     let bc_path2 = bc_path.clone();
     eprintln!("## extract bitcode from {:?} to {:?} using llvm-link at {:?}",
-              exe_path, bc_path, user_llvm_link_cmd());
+              exe_path, bc_path, common::user_llvm_link_cmd());
     let extract_opts = ExtractOptions { input: exe_path,
                                         output: bc_path,
-                                        llvm_link_path: user_llvm_link_cmd(),
+                                        llvm_link_path: common::user_llvm_link_cmd(),
                                         verbose: vec![true] };
-    extract_bitcode(extract_opts)?;
+    common::extract_bitcode(extract_opts)?;
     eprintln!("## bitcode extracted");
     assert!(bc_path2.exists());
     Ok(())

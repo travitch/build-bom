@@ -32,6 +32,7 @@ In the first step, the tool acts as a wrapper around the real build system.  It 
 
 In the next step, the tool extracts all of the accumulated bitcode.
 
+
 ** Bitcode Generation Options
 
 The ~generate-bitcode~ command has a number of options that may be useful in various contexts.
@@ -39,6 +40,7 @@ The ~generate-bitcode~ command has a number of options that may be useful in var
 - ~--bc-out~: Directory to place LLVM bitcode (bc) output data
 - ~--clang~: Specify the full name (or path if desired) of a clang binary to use
 - ~--suppress-automatic-debug~: By default, ~build-bom~ automatically adds the ~-g~ flag when building bitcode to generate debug information; this flag inhibits this behavior
+- ~--strict~: Generate strictly adhering bitcode: leaves in compilation arguments (e.g. optimization, arch-specific flags, etc.) that are normally removed because they might be problematic for ~clang~.
 - ~--inject-argument=STRING~: Directs ~build-bom~ to inject an additional argument (~STRING~) into the command line for the command used to build bitcode (e.g., to configure the optimization level or level of debug information); can be specified multiple times
 - ~--remove-argument=REGEX~: Directs ~build-bom~ to remove any argument matching the regular expression from the argument list when generating bitcode; can be specified multiple times
 
@@ -54,7 +56,7 @@ The ~extract-bitcode~ command also provides options:
 
 * Design
 
-The tool uses low-level operating system services to observe builds and record their actions.  On Linux, it uses ~ptrace~ to observe every system call.  When a source compilation command is observed, the tool generates the corresponding bitcode file using clang.  It attaches the bitcode file to the object file, allowing bitcode to be accumulated as a side effect of the build.  At every stage, bitcode remains attached to build artifacts to ensure it is not lost.
+The tool uses low-level operating system services to observe builds and record their actions.  On Linux, it uses ~ptrace~ to observe every system call.  When a source compilation command is observed, the tool generates the corresponding bitcode file using clang.  It attaches the bitcode to the object file via a separate ELF section, allowing bitcode to be accumulated as a side effect of the build.  At every stage, bitcode remains attached to build artifacts to ensure it is not lost.
 
 There are four key observations enabling this approach to bitcode collection:
 1. Whenever we see the original build system compile a C/C++ file, we know we need to make the corresponding bitcode file
@@ -63,6 +65,15 @@ There are four key observations enabling this approach to bitcode collection:
 4. Standard tar files can be concatenated to produce a valid tar file that is the union of their contents
 
 We wrap our generated bitcode in singleton tar files and allow the linker to accumulate them for us. When we want to collect aggregated bitcode for executable artifacts, we simply extract the tar file from their special LLVM bitcode ELF sections, extract the collected bitcode, and link it together with ~llvm-link~.
+
+Observe as well that the ~build-bom~ process useful for selective rebuilds: rebuilding only a portion of the sources will still have access to llvm-bitcode ELF sections in object from previous builds.  The use of ~build-bom~ also has graceful degradation properties: object files which do not have llvm bitcode sections in their ELF (i.e. built separately without using ~build-bom~) will simply not contributed to the ELF section/tarfile accumulation of bitcode; the final extraction ~llvm-link~ does not need to be total and is tolerant of unresolved symbols.
+
+The bitcode extracted will be representative of the binary code contained in the specified file.  It will not necessarily be identical to that code due to strictness flags, differences between clang and the native build compiler, and a different linking step.
+
+ * Executable: bitcode for the entirety of the executable, including any static libraries the executable was linked with, but _not_ including any shared libraries (even if they themselves were built with ~build-bom~) or components built outside of a ~build-bom~ process.
+ * Shared library: bitcode for the entirety of the shared library will be extracted, excluding any components of the library built outside of a ~build-bom~ process.
+ * Static library: bitcode will only be available for the last element in the library.  This is due to ~build-bom~'s use of ~objcopy~ to extract the ELF sections: all llvm bitcode sections from each member of the static library will be extracted, but they will successively overwrite each other, leaving only the bitcode from the last entry in the library.  This is also noted in https://github.com/travitch/build-bom/issues/42.
+
 
 This tool is also able to record all relevant system calls into a log.  The tracing is designed to capture all of the information necessary to replay a build.  It currently doesn't capture everything (especially file move and directory operations), but will be extended as-needed.  Beyond system calls, it also captures the environment and working directory of each executed command.
 
