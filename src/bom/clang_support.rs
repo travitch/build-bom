@@ -198,6 +198,7 @@ static CLANG_ARGUMENT_BLACKLIST : &'static [&str] =
       r"^-fconserve-stack$",
       r"^-falign-jumps=\d+$",
       r"^-falign-loops=\d+$",
+      r"^-fsingle-precision-constant$",
       r"^--param=",
       r"^-quiet$",
       r"^-auxbase-strip$", // https://gcc.gnu.org/legacy-ml/gcc-help/2013-08/msg00067.html
@@ -211,6 +212,11 @@ static CLANG_ARGUMENT_BLACKLIST : &'static [&str] =
       r"^-fdump-rtl-",
       r"^-M{1,2}D$",
       r"^-d[MDNIU]$",
+
+      // Options which generate ancillary files that should not be changed from
+      // the primary compilation run.
+      r"^-MF$",
+      r"^-MT$", // not strictly output, but fails without -M or -MM
 
       r"^-Q$",
       ];
