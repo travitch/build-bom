@@ -3,7 +3,8 @@ name = "build-bom"
 version = "0.2.0"
 authors = ["Tristan Ravitch <tristan@ravit.ch>"]
 license = "MIT OR Apache-2.0"
-edition = "2018"
+edition = "2021"
+description = "Utility to extract LLVM bitcode from a build process."
 
 [[bin]]
 name = "build-bom"
@@ -16,6 +17,7 @@ path = "src/lib.rs"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+clap = { version = "4", features = ["derive"] }
 pete = "^0.7"
 os_pipe = "^0.9"
 anyhow = "^1"
@@ -23,7 +25,6 @@ byteorder = "^1.3"
 env_logger = "0.11"
 log = "0.4"
 nix = "^0.22"
-structopt = "^0.3"
 serde = { version = "^1", features = ["derive"] }
 rmp-serde = "^0.14"
 serde_json = "1.0"

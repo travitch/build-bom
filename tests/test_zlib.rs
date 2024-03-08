@@ -76,7 +76,7 @@ fn zlib_do_build() -> anyhow::Result<(TempDir, String, PathBuf)> {
                                     suppress_automatic_debug: false,
                                     inject_arguments: Vec::new(),
                                     remove_arguments: Vec::new(),
-                                    verbose: vec![true],
+                                    verbose: 1,
                                     strict: false,
                                     command: cmd_opts,
                                     any_fail: false };
@@ -114,7 +114,7 @@ fn test_zlib_sharedlib() -> anyhow::Result<()> {
                                         output: bc_path,
                                         llvm_link_path: common::user_llvm_link_cmd(),
                                         objcopy_path: None,
-                                        verbose: vec![true, true]};
+                                        verbose: 2 };
     common::extract_bitcode(extract_opts)?;
 
     // Bitcode extracted from a shared library is the sum total of all the
@@ -144,7 +144,7 @@ fn test_zlib_staticlib() -> anyhow::Result<()> {
                                         output: bc_path,
                                         llvm_link_path: common::user_llvm_link_cmd(),
                                         objcopy_path: None,
-                                        verbose: vec![true, true]};
+                                        verbose: 2 };
     common::extract_bitcode(extract_opts)?;
 
     // When extracting bitcode from a static library, build-bom extracts only the
@@ -188,7 +188,7 @@ fn test_zlib_exe_static() -> anyhow::Result<()> {
                                         output: bc_path,
                                         llvm_link_path: common::user_llvm_link_cmd(),
                                         objcopy_path: None,
-                                        verbose: vec![true, true]};
+                                        verbose: 2 };
     common::extract_bitcode(extract_opts)?;
 
     // Bitcode extracted from an executable linked against a static library
@@ -223,7 +223,7 @@ fn test_zlib_exe_sharedlib() -> anyhow::Result<()> {
                                         output: bc_path,
                                         llvm_link_path: common::user_llvm_link_cmd(),
                                         objcopy_path: None,
-                                        verbose: vec![true, true]};
+                                        verbose: 2 };
     common::extract_bitcode(extract_opts)?;
 
     // Bitcode extracted from an executable linked against a shared library is
@@ -276,7 +276,7 @@ fn test_zlib_exe_modified() -> anyhow::Result<()> {
                                         suppress_automatic_debug: false,
                                         inject_arguments: Vec::new(),
                                         remove_arguments: Vec::new(),
-                                        verbose: vec![true, true],
+                                        verbose: 2,
                                         strict: false,
                                         command: cmd_opts,
                                         any_fail: false };
@@ -310,7 +310,7 @@ fn test_zlib_exe_modified() -> anyhow::Result<()> {
                                             output: bc_path,
                                             llvm_link_path: common::user_llvm_link_cmd(),
                                             objcopy_path: None,
-                                            verbose: vec![true, true]};
+                                            verbose: 2 };
         common::extract_bitcode(extract_opts)?;
 
         // Bitcode extracted from an executable linked against a static library
