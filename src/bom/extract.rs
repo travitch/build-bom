@@ -100,6 +100,6 @@ pub fn do_bitcode_extraction(extract_options : &ExtractOptions,
 
     link_bc_files.set_input_file(&FileArg::glob_in(tmp_path, "*.bc"));
 
-    let executor = get_executor(extract_options.verbose.len());
+    let executor = get_executor(extract_options.verbose);
     extract_ops.execute_here(&executor).map(|_| 0)
 }

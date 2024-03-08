@@ -125,7 +125,7 @@ struct BCOpts<'a,  Exec: OsRun> {
     /// Strict: maintain strict adherence between the bitcode and the target code
     /// (optimization, target architecture, etc.)
     strict : bool,
-    verbosity: usize,
+    verbosity: u8,
     executor: Exec,
 }
 
@@ -168,7 +168,7 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
     let rx_strs = bitcode_options.remove_arguments.iter().map(|rx| rx.as_str());
     let remove_rx = RegexSet::new(rx_strs)?;
 
-    let verbosity = bitcode_options.verbose.len();
+    let verbosity = bitcode_options.verbose;
     let bc_opts = BCOpts { clang_path : &bitcode_options.clang_path,
                            objcopy_path : &bitcode_options.objcopy_path,
                            bitcode_directory : &bitcode_options.bcout_path.as_ref(),

@@ -1,61 +1,88 @@
 use chainsop::Executor;
 use regex::Regex;
-use structopt::StructOpt;
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::string::ToString;
 
-#[derive(Debug,StructOpt)]
-#[structopt(version = "1.0", author = "Tristan Ravitch",
-            about="Utility to extract LLVM bitcode from a build process.\n\nLogging is controlled with various -v options or via the RUST_LOG/RUST_log_style as described in https://docs.rs/env_logger documentation."
-)]
+#[derive(Debug,Parser)]
+#[command(version, about)]
+#[command(after_long_help="Logging is controlled with various -v options or via the RUST_LOG/RUST_LOG_STYLE\nas described in https://docs.rs/env_logger documentation.")]
 pub struct Options {
-    #[structopt(subcommand)]
-    pub subcommand : Subcommand
+    #[command(subcommand)]
+    pub subcommand : BbCommand
 }
 
-#[derive(Debug,StructOpt)]
-pub enum Subcommand {
+#[derive(Debug,Subcommand)]
+pub enum BbCommand {
+    /// Trace the actions of a build command
+    #[command(display_order=3)]
     Trace(TraceOptions),
+    /// A normalization pass over traced build actions
+    #[command(display_order=2)]
     Normalize(NormalizeOptions),
+    /// Generate bitcode into build outputs during build tool run
+    #[command(display_order=0)]
     GenerateBitcode(BitcodeOptions),
+    /// Extract bitcode from build outputs
+    #[command(display_order=1)]
     ExtractBitcode(ExtractOptions)
 }
 
-#[derive(Debug,StructOpt)]
+#[derive(Debug,Parser)]
 pub struct ExtractOptions {
-    #[structopt(help="The file to extract bitcode from")]
+    /// The file to extract the generated bitcode from
     pub input : PathBuf,
-    #[structopt(short="o", long="output", help="The file to save the resulting bitcode file to")]
+    /// Output bitcode file
+    #[arg(short, long)]
     pub output : PathBuf,
-    #[structopt(long="llvm-link-path", help="The path to the llvm-link tool (possibly version suffixed)")]
+    /// The path to the llvm-link tool (possibly version suffixed)
+    #[arg(long="llvm-link", value_hint=clap::ValueHint::FilePath)]
     pub llvm_link_path : Option<PathBuf>,
-    #[structopt(long="objcopy-path", help="The path to the objcopy tool (possibly version suffixed)")]
+    /// The path to the objcopy tool (possibly version suffixed)
+    #[arg(long="objcopy")]
     pub objcopy_path : Option<PathBuf>,
-    #[structopt(short="v", long="verbose", help="Generate verbose output.  Twice for additional verbosity.")]
-    pub verbose : Vec<bool>,
+    /// Generate verbose output.  Twice for additional verbosity.
+    #[arg(short, long, action=clap::ArgAction::Count)]
+    pub verbose : u8,
 }
 
-#[derive(Clone,Debug,StructOpt)]
+#[derive(Clone,Debug,Parser)]
 pub struct BitcodeOptions {
-    #[structopt(long="clang", help="Name of the clang binary to use to generate bitcode (default: `clang`)")]
+    /// Name of the clang binary to use to generate bitcode (default: `clang`)
+    #[arg(long="clang")]
     pub clang_path : Option<PathBuf>,
-    #[structopt(long="objcopy-path", help="The path to the objcopy tool (possibly version suffixed)")]
+    /// The path to the objcopy tool (default: `objcopy`)
+    #[arg(long="objcopy")]
     pub objcopy_path : Option<PathBuf>,
-    #[structopt(short="b", long="bc-out", help="Directory to place LLVM bitcode (bc) output data.  The default is to place it next to the object file, but it must be accessible by a subsequent Extract operation and some build tools build in a temporary directory that is disposed of at the end of the build (e.g. CMake) ")]
-    pub bcout_path : Option<PathBuf>,
-    #[structopt(short="v", long="verbose", help="Generate verbose output. Twice for additional verbosity.")]
-    pub verbose : Vec<bool>,
-    #[structopt(long="suppress-automatic-debug", help="Prevent `build-bom` from automatically injecting flags to generate debug information in bitcode files")]
-    pub suppress_automatic_debug : bool,
-    #[structopt(long="inject-argument", help="Have `build-bom` inject the given argument into the argument list when generating bitcode")]
-    pub inject_arguments : Vec<String>,
-    #[structopt(long="remove-argument", help="Have `build-bom` remove arguments matching the given regular expression when generating bitcode")]
-    pub remove_arguments : Vec<Regex>,
-    #[structopt(last = true, help="The build command to run")]
-    pub command : Vec<String>,
-    #[structopt(long="strict", help="Generate bitcode that strictly adheres to the target object code (optimization levels, target architecture, etc.).")]
+    /// Generate bitcode that strictly adheres to the target object code
+    /// (optimization levels, target architecture, etc.)
+    #[arg(long)]
     pub strict : bool,
+    /// Generate verbose output.  Twice for additional verbosity.
+    #[arg(short, long, action=clap::ArgAction::Count)]
+    pub verbose : u8,
+    /// Prevent `build-bom` from automatically injecting flags to generate debug
+    /// information in bitcode files
+    #[arg(long="suppress-automatic-debug")]
+    pub suppress_automatic_debug : bool,
+    /// Inject the given argument into the clang argument list when generating bitcode
+    #[arg(long="inject-argument")]
+    pub inject_arguments : Vec<String>,
+    /// Remove clang arguments matching the given regular expression when generating bitcode
+    #[arg(long="remove-argument")]
+    pub remove_arguments : Vec<Regex>,
+    /// Directory to place LLVM bitcode (bc) output data.
+    ///
+    /// The default is to place it next to the object file, but it must be
+    /// accessible by a subsequent Extract operation and some build tools build
+    /// in a temporary directory that is disposed of at the end of the build
+    /// (e.g. CMake)
+    #[arg(short='b', long="bc-out")]
+    pub bcout_path : Option<PathBuf>,
+    /// The build command to run
+    #[arg(last = true)]
+    pub command : Vec<String>,
 
     // The following is for testing only: if set, it will fail if any portion of
     // the generate_bitcode operations fail.  In normal operation, this is false
@@ -63,26 +90,30 @@ pub struct BitcodeOptions {
     // compilation attempt is successful (i.e. any errors during bitcode
     // generation are logged and counted but do not cause an overall failure
     // result).
-    #[structopt(skip)]
+    #[arg(skip)]
     pub any_fail : bool
 }
 
-#[derive(Debug,StructOpt)]
-#[structopt(help="A normalization pass over traced build actions")]
+#[derive(Debug,Parser)]
 pub struct NormalizeOptions {
-    #[structopt(help = "A file containing raw traced build actions")]
+    /// File containing raw traced build actions
     pub input : PathBuf,
-    #[structopt(short = "o", long = "output", help = "The file to save normalized traced build actions to")]
+    /// The file to save normalized traced build actions to"
+    #[arg(short, long)]
     pub output : PathBuf,
-    #[structopt(default_value, short = "s", long = "strategy", help = "The translation strategy for strings")]
+    /// The translation strategy for strings
+    #[arg(short, long, default_value_t = StringNormalizeStrategy::Strict)]
     pub strategy : StringNormalizeStrategy,
-    #[structopt(short = "n", long = "normalize", help = "Enable the named normalization strategy")]
+    /// Enable the named normalization strategy
+    #[arg(short, long)]
     pub normalize : Vec<Normalization>,
-    #[structopt(short = "a", long = "all", help = "Enable all normalization passes")]
+    /// Enable all normalization passes
+    #[arg(short, long = "all")]
     pub all_normalizations : bool
 }
 
-#[derive(Debug,StructOpt,Hash,Eq,PartialEq,PartialOrd,Ord,Copy,Clone)]
+#[derive(Debug,Parser,Hash,Eq,PartialEq,PartialOrd,Ord,Copy,Clone)]
+#[derive(ValueEnum)]
 pub enum Normalization {
     ElideClose,
     ElideFailedOpen,
@@ -114,12 +145,13 @@ impl ToString for Normalization {
     }
 }
 
-#[derive(Debug,StructOpt)]
-#[structopt(help="Trace the actions of a build command")]
+#[derive(Debug,Parser)]
 pub struct TraceOptions {
-    #[structopt(short = "o", long = "output", help = "The file to save traced build actions to")]
+    /// The file to save traced build actions to
+    #[arg(short, long)]
     pub output : PathBuf,
-    #[structopt(last = true)]
+    /// The build command to perform
+    #[arg(last = true)]
     pub command : Vec<String>
 }
 
@@ -164,11 +196,14 @@ impl ToString for InvalidNormalization {
     }
 }
 
-#[derive(Debug,StructOpt)]
+#[derive(Clone,Debug)]
+#[derive(ValueEnum)]
 pub enum StringNormalizeStrategy {
-    #[structopt(help="Require no encoding errors when converting strings from raw form to their Rust forms")]
+    /// Require no encoding errors when converting strings from raw form to their
+    /// Rust forms
     Strict,
-    #[structopt(help="Replace invalid utf-8 encoded data with defaults; this can make builds non-replayable")]
+    /// Replace invalid utf-8 encoded data with defaults; this can make builds
+    /// non-replayable
     Lenient
 }
 
@@ -176,7 +211,7 @@ impl Default for StringNormalizeStrategy {
     fn default () -> Self { StringNormalizeStrategy ::Strict }
 }
 
-pub fn get_executor(verbosity: usize) -> Executor {
+pub fn get_executor(verbosity: u8) -> Executor {
     match verbosity {
         0 => Executor::NormalRun,
         1 => Executor::NormalWithLabel,

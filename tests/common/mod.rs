@@ -1,5 +1,5 @@
 use bom;
-use bom::bom::options::{BitcodeOptions, ExtractOptions, Options, Subcommand};
+use bom::bom::options::{BitcodeOptions, ExtractOptions, Options, BbCommand};
 use std::path::{PathBuf};
 
 pub static SOURCE_DIR: &'static str = "tests/sources";
@@ -28,7 +28,7 @@ pub fn user_llvm_dis_cmd() -> PathBuf {
 }
 
 pub fn gen_bitcode(gen_opts : BitcodeOptions) -> anyhow::Result<()> {
-    let gen_cmd = Subcommand::GenerateBitcode(gen_opts);
+    let gen_cmd = BbCommand::GenerateBitcode(gen_opts);
     let gen_opt = Options { subcommand: gen_cmd };
     let rc = bom::run_bom_command(gen_opt)?;
     assert_eq!(rc, 0);
@@ -36,7 +36,7 @@ pub fn gen_bitcode(gen_opts : BitcodeOptions) -> anyhow::Result<()> {
 }
 
 pub fn extract_bitcode(extract_opts : ExtractOptions) -> anyhow::Result<()> {
-    let extract_cmd = Subcommand::ExtractBitcode(extract_opts);
+    let extract_cmd = BbCommand::ExtractBitcode(extract_opts);
     let extract_opt = Options { subcommand: extract_cmd };
     let rc = bom::run_bom_command(extract_opt)?;
     assert_eq!(rc, 0);

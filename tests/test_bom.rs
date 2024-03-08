@@ -165,7 +165,7 @@ fn test_no_compile_only() -> anyhow::Result<()> {
                                     suppress_automatic_debug: false,
                                     inject_arguments: Vec::new(),
                                     remove_arguments: Vec::new(),
-                                    verbose: vec![],
+                                    verbose: 0,
                                     strict: false,
                                     command: cmd_opts,
                                     any_fail: true };
@@ -183,7 +183,7 @@ fn test_no_compile_only() -> anyhow::Result<()> {
                                         output: bc_path,
                                         llvm_link_path: common::user_llvm_link_cmd(),
                                         objcopy_path: None,
-                                        verbose: vec![] };
+                                        verbose: 0 };
     common::extract_bitcode(extract_opts)?;
     eprintln!("## bitcode extracted");
     assert!(bc_path2.exists());
@@ -224,7 +224,7 @@ fn test_blddir() -> anyhow::Result<()> {
                                     suppress_automatic_debug: false,
                                     inject_arguments: Vec::new(),
                                     remove_arguments: Vec::new(),
-                                    verbose: vec![true],
+                                    verbose: 1,
                                     strict: true,
                                     // preproc_native: true,
                                     command: cmd_opts,
@@ -245,7 +245,7 @@ fn test_blddir() -> anyhow::Result<()> {
                                         output: bc_path,
                                         llvm_link_path: common::user_llvm_link_cmd(),
                                         objcopy_path: None,
-                                        verbose: vec![true] };
+                                        verbose: 1 };
     common::extract_bitcode(extract_opts)?;
     eprintln!("## bitcode extracted");
     assert!(bc_path2.exists());
