@@ -385,7 +385,7 @@ fn build_bitcode_compile_only(chan : &mut mpsc::Sender<Option<Event>>,
                                           orig_compiler_cmd, args,
                                           &mut bitcode_ops)?;
 
-    if !obj_already_has_bitcode(cwd, &objfile) {
+    if !obj_already_has_bitcode(bc_opts, cwd, &objfile) {
         let _res = chan.send(Some(Event::BitcodeGenerationAttempts));
 
         // Inserts the generated bitcode file into a tarfile.
@@ -535,37 +535,55 @@ pub enum BitcodeError {
 /// ELF_SECTION_NAME, but whose contents are not the bitcode file.
 /// That is a much more complex (and unlikely) scenario that is not
 /// addressed here.
-fn obj_already_has_bitcode(cwd : &Path, obj_target : &OsString) -> bool {
-    match process::Command::new("objdump")
-        .args(&["-h", "-j", ELF_SECTION_NAME,
-                &obj_target.to_str().unwrap()])
-        .current_dir(cwd)
-        .output() {
-            Err(err) => {
-                error!("Error checking {:?} section existence: {:?}", ELF_SECTION_NAME, err);
-                // TODO something else here?  another event?
-                false
-            }
-            Ok(sts) => {
-                // n.b. ignore success or failure of the command
-                // because different objdump builds have different
-                // results: the gnu objdump tends to fail with a
-                // non-zero exit code, but the llvm objdump simply
-                // generates a warning and exits with success).
-                match std::str::from_utf8(&sts.stderr) {
-                    Ok(estr) => {
-                        estr.lines()
-                            .filter(|l| (l.contains(&format!("section '{}' mentioned",
-                                                             ELF_SECTION_NAME))
-                                         && l.contains("but not found in any input file")))
-                            .collect::<Vec<&str>>()
-                            .is_empty()
-                    }
-                    Err(_) => { false }
-                }
-            }
+fn obj_already_has_bitcode(bc_opts : &BCOpts<impl OsRun>,
+                           cwd : &Path,
+                           obj_target : &OsString) -> bool {
+    // Could use objdump for this as well, but in cases where cross-compilation
+    // is being performed, the user would need a way to specify the objdump
+    // executable to use that is similar to the ability to specify the objcopy
+    // executable.  Since objcopy is already specified, just use that here.
+    //
+    // However, to use objcopy we need a directory because objcopy always writes
+    // at least one output and sometimes multiple outputs (see note in extract.rs
+    // for more details).
+    match tempfile::TempDir::new() {
+        Err(_) => false,
+        Ok(tmp_dir) => {
+            let res = obj_already_has_bitcode_inner(bc_opts, cwd, obj_target,
+                                                    tmp_dir.path());
+            // The following ensures that tmp_dir still has ownership of the
+            // associated resources and that they weren't inadvertently dropped
+            // during bitcode extraction.  This uses Rust's ownership to help
+            // avoid the "Early drop pitfall" described at
+            // https://docs.rs/tempfile/latest/tempfile.
+            std::mem::drop(tmp_dir);
+            res
+        }
+    }
+}
+
+fn obj_already_has_bitcode_inner(bc_opts : &BCOpts<impl OsRun>,
+                                 cwd : &Path,
+                                 obj_target : &OsString,
+                                 tmp_path : &Path) -> bool {
+    let mut dummy_output = PathBuf::from(tmp_path);
+    dummy_output.push("discard{out-file}");  // arbitrary name
+    let mut section_output = PathBuf::from(tmp_path);
+    section_output.push("discard{section-file}");  // arbitrary name
+    match run(&Executable::new("objcopy",
+                               ExeFileSpec::Append,
+                               ExeFileSpec::Append),
+              &bc_opts.objcopy_path)
+        .push_arg("--dump-section")
+        .push_arg(format!("{}={}", ELF_SECTION_NAME, section_output.display()))
+        .set_input_file(&FileArg::loc(obj_target))
+        .set_output_file(&FileArg::loc(dummy_output))
+        .execute(&bc_opts.executor, &Some(cwd)) {
+            Err(_) => false,
+            Ok(_) => section_output.exists(),
         }
 }
+
 
 /// Create a singleton tar file with the bitcode file.
 ///
@@ -1132,6 +1150,43 @@ mod tests {
         }
     }
 
+    fn clean_temp_in_args(args: &Vec<OsString>) -> Vec<OsString> {
+        // The tests here would like to compare the actual args against a
+        // known set, but sometimes the actual args contain generated
+        // temporary files.  This function applies various heuristics to
+        // identify and strip or convert those temporary files into a static
+        // pattern for the simple equality comparisons below.  These
+        // heuristics are based on the patterns used for those temp files in
+        // the main code.
+        args.iter().map(clean_temp_in_arg).collect()
+    }
+    fn clean_temp_with_suffix(argstr: &String, sfx: &str) -> String {
+        if argstr.ends_with(sfx) {
+            // If the argstr is something like "--foo=/tmp/dir/is/tmpfile{sfx}",
+            // tries to just remove the file portion and return "--foo={sfx}".
+            match argstr.find("/") {
+                Some(i) => {
+                    let mut r = String::new();
+                    r.push_str(&argstr[..i]);
+                    r.push_str(sfx);
+                    r
+                },
+                None => String::from(sfx)
+            }
+        } else {
+            String::from(argstr)
+        }
+    }
+    fn clean_temp_in_arg(arg: &OsString) -> OsString {
+        let argstr = arg.to_string_lossy();
+        clean_temp_with_suffix(
+            &clean_temp_with_suffix(&String::from(argstr),
+                                    "discard{section-file}"),
+            "discard{out-file}")
+            .into()
+    }
+
+
     impl OsRun for TestCollector {
         fn run_executable(&self,
                           label: &str,
@@ -1142,7 +1197,7 @@ mod tests {
             self.0.borrow_mut()
                 .push(TestOp::SPO(RunExec{ name: String::from(label),
                                            exe: PathBuf::from(exe_file),
-                                           args: args.clone(),
+                                           args: clean_temp_in_args(args),
                                            dir: fromdir.clone()
             }));
             OsRunResult::Good
@@ -1234,7 +1289,7 @@ mod tests {
         };
         let captured = bcopts.executor.0.borrow().clone();
         // Check temporary output file in the middle of the chain
-        let tarfile = match &captured[1] {
+        let tarfile = match &captured[2] {
             TestOp::FO(rf) => match &rf.outfile {
                 Some(tmp_path) => tmp_path.clone(),
                 None => {
@@ -1250,23 +1305,34 @@ mod tests {
         // Verify full recorded sequence trace
         assert_eq!(captured,
                    [ TestOp::SPO(
-                       RunExec { name: "clang:emit-llvm".to_string(),
-                                 exe: "/path/to/clang".into(),
+                       RunExec { name: "objcopy".to_string(),
+                                 exe: "objcopy".into(),
                                  args: [
-                                     "-emit-llvm",
-                                     "-c",
-                                     "-g",
-                                     "-O0",
-                                     "-Wno-error=unused-command-line-argument",
-                                     "-arg1",
-                                     "-arg2", "arg2val",
-                                     "-g",
-                                     "-DDebug",
-                                     "-o",
-                                     "path/to/bitcode/foo.bc",
-                                     "bar.c"
+                                     "--dump-section",
+                                     &format!(".llvm_bitcode={}",
+                                              "discard{section-file}"),
+                                     "foo.obj",
+                                     "discard{out-file}"
                                  ].map(OsString::from).to_vec(),
                                  dir: Some("/somE/path".into()) }),
+                     TestOp::SPO(
+                         RunExec { name: "clang:emit-llvm".to_string(),
+                                   exe: "/path/to/clang".into(),
+                                   args: [
+                                       "-emit-llvm",
+                                       "-c",
+                                       "-g",
+                                       "-O0",
+                                     "-Wno-error=unused-command-line-argument",
+                                       "-arg1",
+                                       "-arg2", "arg2val",
+                                       "-g",
+                                       "-DDebug",
+                                       "-o",
+                                       "path/to/bitcode/foo.bc",
+                                       "bar.c"
+                                   ].map(OsString::from).to_vec(),
+                                   dir: Some("/somE/path".into()) }),
                      TestOp::FO(
                          RunFunc { fname: "gen_bitcode_tar".to_string(),
                                    inpfiles: [
@@ -1317,7 +1383,7 @@ mod tests {
         }
         let captured1 = bcopts_strict.executor.0.borrow().clone();
         // Check temporary output file in the middle of the chain
-        let tarfile = match &captured1[1] {
+        let tarfile = match &captured1[2] {
             TestOp::FO(rf) => match &rf.outfile {
                 Some(tmp_path) => tmp_path.clone(),
                 None => {
@@ -1333,6 +1399,17 @@ mod tests {
         // Verify full recorded sequence trace
         assert_eq!(captured1,
                    [ TestOp::SPO(
+                       RunExec { name: "objcopy".to_string(),
+                                 exe: "objcopy".into(),
+                                 args: [
+                                     "--dump-section",
+                                     &format!(".llvm_bitcode={}",
+                                              "discard{section-file}"),
+                                     "foo.obj",
+                                     "discard{out-file}"
+                                 ].map(OsString::from).to_vec(),
+                                 dir: Some("/A/path".into()) }),
+                     TestOp::SPO(
                        RunExec { name: "clang:emit-llvm".to_string(),
                                  exe: "/path/to/clang".into(),
                                  args: [
@@ -1409,7 +1486,7 @@ mod tests {
         }
         let captured2 = bcopts_notstrict.executor.0.borrow().clone();
         // Check temporary output file in the middle of the chain
-        let tarfile = match &captured2[1] {
+        let tarfile = match &captured2[2] {
             TestOp::FO(rf) => match &rf.outfile {
                 Some(tmp_path) => tmp_path.clone(),
                 None => {
@@ -1425,6 +1502,17 @@ mod tests {
         // Verify full recorded sequence trace
         assert_eq!(captured2,
                    [ TestOp::SPO(
+                       RunExec { name: "objcopy".to_string(),
+                                 exe: "objcopy".into(),
+                                 args: [
+                                     "--dump-section",
+                                     &format!(".llvm_bitcode={}",
+                                              "discard{section-file}"),
+                                     "foo.obj",
+                                     "discard{out-file}"
+                                 ].map(OsString::from).to_vec(),
+                                 dir: Some("here".into()) }),
+                     TestOp::SPO(
                        RunExec { name: "clang:emit-llvm".to_string(),
                                  exe: "/path/to/clang".into(),
                                  args: [
