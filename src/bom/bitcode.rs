@@ -882,6 +882,14 @@ fn extract_compile_modifiers(rc : &RunCommand) -> CompileModifiers {
         // bitcode to extract
         mods.is_non_generative =
             mods.is_non_generative || arg_is_non_generative(arg, &rc.args.len());
+
+        // Oddly, "clang -c -emit-llvm -o foo.bc foo.s" results in the foo.bc
+        // file containing post-preprocessor form of foo.s, and *not* bitcode,
+        // so if it looks like and assembly source file, skip it.
+        if !arg.to_str().unwrap().starts_with("-")
+            && arg.to_str().unwrap().ends_with(".s") {
+                mods.is_assemble_only = true;
+            }
     }
 
     mods
