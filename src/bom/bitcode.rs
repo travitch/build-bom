@@ -104,7 +104,9 @@ pub enum TracerError {
     #[error("Unexpected exit state on top-level subprocess exit")]
     UnexpectedExitState(pete::Stop),
     #[error("No command given")]
-    NoCommandGiven
+    NoCommandGiven,
+    #[error("Unable to start tracee process")]
+    NoTraceeOnExit,
 }
 
 /// Options controlling bitcode generation that we need to plumb through most of the process
@@ -137,16 +139,25 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
     let (cmd0, args0) = bitcode_options.command.split_at(1);
     let cmd_path = which::which(OsString::from(&cmd0[0]))?;
 
-    let mut cmd = Command::new(cmd_path);
+    let mut cmd = Command::new(cmd_path.clone());
     cmd.args(args0);
     let mut ptracer = pete::Ptracer::new();
 
     // Spawn the subprocess for the command and start it (it starts off
     // suspended to allow the ptracing process to attach)
-    let _child = ptracer.spawn(cmd);
+    let child = ptracer.spawn(cmd);
+    match child {
+        Ok(_) => {}
+        Err(e) => {
+            error!("ERROR spawning tracee (command: {}, explicitly: {:?}): {}",
+                   bitcode_options.command.join(" "), cmd_path, e);
+            bail!(TracerError::NoTraceeOnExit);
+        }
+    }
     match ptracer.wait()? {
         None => {
             error!("Error spawning tracee (command: {})", bitcode_options.command.join(" "));
+            bail!(TracerError::NoTraceeOnExit);
         }
         Some(tracee) => {
             ptracer.restart(tracee, pete::Restart::Syscall)?;
