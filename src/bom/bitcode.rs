@@ -89,7 +89,7 @@ use std::sync::mpsc;
 use std::thread;
 use sha2::{Digest,Sha256};
 use thiserror::Error;
-use chainsop::{ChainedOps, Executable, ExeFileSpec, OpInterface,
+use chainsop::{ChainedOps, Executable, ExeFileSpec, OpInterface, Activation,
                FileArg, FilesPrep, FunctionOperation, OsRun};
 
 use crate::bom::options::{BitcodeOptions, get_executor};
@@ -127,6 +127,9 @@ struct BCOpts<'a,  Exec: OsRun> {
     /// Strict: maintain strict adherence between the bitcode and the target code
     /// (optimization, target architecture, etc.)
     strict : bool,
+    /// If true, use the native compiler to pre-process the code before
+    /// generating the bitcode with clang.
+    native_preproc : bool,
     verbosity: u8,
     executor: Exec,
 }
@@ -188,6 +191,7 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
                            remove_arguments : &remove_rx,
                            strict : bitcode_options.strict,
                            verbosity,
+                           native_preproc : bitcode_options.preproc_native,
                            executor : get_executor(verbosity),
     };
     let ptracer1 = generate_bitcode(&mut sender, ptracer, &bc_opts)?;
@@ -250,7 +254,17 @@ fn make_bitcode_filename(target : &OsString, bc_dir : &Option<&PathBuf>) -> Path
 }
 
 /// Given original arguments (excluding argv[0]), construct the command line we
-/// will pass to clang to build bitcode
+/// will pass to clang to build bitcode.  This will occur in one of two ways:
+///
+///  1) call clang with all arguments from the original compile command except
+///     those that are blacklisted (and whitelisted unless --strict) and with
+///     additional flags to emit LLVM bitcode instead of object code.
+///
+///  2) if native_preproc is true, call the original compiler with most original
+///     compile arguments (except those that are blacklisted and, if not
+///     --strict, whitelisted) and pass -E to run the pre-processor only.  Then
+///     run the clang bitcode generation (with only those arguments relating to
+///     code generation) on that pre-processor output.
 ///
 /// This handles removing flags that clang can't handle (or that we definitely
 /// do not want for bitcode generation), as well as transforming the output file
@@ -263,8 +277,61 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
 {
     let mut orig_target = None;
 
+    // Determine the language of the original input file, so that the bitcode can
+    // utilize the same language, because using C++ mode to compile C will cause
+    // errors:
+    //
+    // char* greeting() { return "hello, world"; }
+    //
+    // The above is perfectly acceptable C, but if compile as C++ it yields:
+    // error: ISO C++11 does not allow conversion from string literal to 'char*'.
+    let is_c_plusplus = orig_args.iter().find(
+        |&arg| arg.to_str().map(|a| !a.starts_with("-") &&
+                                (a.ends_with(".cc") ||
+                                 a.ends_with(".cpp")))
+            .unwrap_or_else(|| false))
+        .is_some();
+    let file_ext = if is_c_plusplus { ".cc" } else { ".c" };
+
+    // If the native compiler is used for preprocessing, it will write to a
+    // temporary output file that is subsequently consumed by clang to generate
+    // the bitcode.
+    let mut preprocess = ops.push_op(
+        &run(&Executable::new(orig_compiler_cmd,
+                              ExeFileSpec::Append,
+                              ExeFileSpec::option("-o")), &None)
+            .push_arg("-E")
+            .set_output_file(&FileArg::temp(file_ext)));
+
     let mut bcgen_op = ops.push_op(&run(&*CLANG_LLVM, bc_opts.clang_path)
                                    .set_label("clang:emit-llvm"));
+
+    if bc_opts.native_preproc {
+        // GCC and clang have internal directives (from system-level include
+        // files) for handling low-level things like alloc/dealloc resource
+        // management, atomic operations, etc.  If the native compiler is GCC,
+        // some of these directives will cause a failure on the clang bitcode
+        // generation path if they are still present.  Since the bitcode is being
+        // generated on a parallel effort and it is not being used for the final
+        // executable, these internal directives can be nullified to get valid
+        // bitcode with a minimal loss of information in that bitcode.
+        //
+        // If --strict is set, these are not applied and must be done manually
+        // via --inject-argument="-D..." if still needed.
+        if !bc_opts.strict {
+            bcgen_op.push_arg("-D__malloc__(X,Y)=");
+            bcgen_op.push_arg("-D__atomic_store(X,Y,Z)=");
+            bcgen_op.push_arg("-D__atomic_fetch_add(X,Y,Z)=0");
+            bcgen_op.push_arg("-D__atomic_fetch_sub(X,Y,Z)=0");
+            bcgen_op.push_arg("-D__atomic_fetch_and(X,Y,Z)=0");
+            bcgen_op.push_arg("-D__atomic_fetch_or(X,Y,Z)=0");
+            bcgen_op.push_arg("-D__atomic_compare_exchange(A,B,C,D,E,F)=0");
+            bcgen_op.push_arg("-D__atomic_exchange(A,B,C,D)=0");
+            bcgen_op.push_arg("-D__atomic_load(A,B,C)=0");
+        }
+    } else {
+        preprocess.active(&Activation::Disabled);
+    };
 
     // Force debug information (unless directed not to)
     if !bc_opts.suppress_automatic_debug {
@@ -279,7 +346,11 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
     }
 
     // Sometimes -Werror might be in the arguments, so make sure this doesn't
-    // cause a failure exit if any other command-line arguments are unused.
+    // cause a failure exit if any other command-line arguments are unused.  Note
+    // that this argument is valid for clang only, not gcc.
+    if CLANG_RE.is_match(orig_compiler_cmd.to_str().unwrap_or_else(|| "cc")) {
+        preprocess.push_arg("-Wno-error=unused-command-line-argument");
+    }
     bcgen_op.push_arg("-Wno-error=unused-command-line-argument");
 
     // Add any arguments that the user directed us to
@@ -335,10 +406,14 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
         } else {
             // This is not an output specifying argument.
             if arg.to_string_lossy().starts_with("-") {
+                preprocess.push_arg(arg);
                 bcgen_op.push_arg(arg);
                 if clang_support::next_arg_is_option_value(arg) {
                     match it.next() {
-                        Some(val) => { bcgen_op.push_arg(val); }
+                        Some(val) => {
+                            preprocess.push_arg(val);
+                            bcgen_op.push_arg(val);
+                        }
                         None => {
                             bail!(BitcodeError::MissingArgValue(
                                 orig_compiler_cmd.into(),
@@ -348,7 +423,7 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
                     }
                 }
             } else {
-                bcgen_op.add_input_file(&FileArg::loc(arg));
+                ops.add_input_file(&FileArg::loc(arg));
             }
         }
     }
@@ -381,6 +456,11 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
         }
     }
 }
+
+lazy_static::lazy_static! {
+    static ref CLANG_RE: regex::Regex = regex::Regex::new("clang").unwrap();
+}
+
 
 fn build_bitcode_compile_only(chan : &mut mpsc::Sender<Option<Event>>,
                               bc_opts : &BCOpts<impl OsRun>,
@@ -1261,6 +1341,7 @@ mod tests {
 
                               ).unwrap(),
                               strict: false,
+                              native_preproc: false,
                               verbosity: 0,
                               executor: TestCollector::new(),
         };
@@ -1365,7 +1446,7 @@ mod tests {
 
         // ----------------------------------------------------------------------
         // Simple cmdline specification, strict bitcode
-        let bcopts_strict = BCOpts { strict: true, ..bcopts };
+        let bcopts_strict = BCOpts { strict: true, native_preproc: true, ..bcopts };
         bcopts_strict.executor.0.swap(&RefCell::new(vec![])); // clear trace
         let bcargs1 = build_bitcode_compile_only(&mut sender, &bcopts_strict,
                                                  &OsString::from("g++"), &args,
@@ -1393,8 +1474,15 @@ mod tests {
             }
         }
         let captured1 = bcopts_strict.executor.0.borrow().clone();
-        // Check temporary output file in the middle of the chain
-        let tarfile = match &captured1[2] {
+        // Check temporary output files in the middle of the chain
+        let preproc_c_file = match &captured1[1] {
+            TestOp::SPO(ro) => ro.args[6].to_string_lossy().into(),  // I counted...
+            _ => {
+                assert!(false, "unexpected FPO at preproc step in {:?}", captured1);
+                String::from("bad preprocessed c path")
+            }
+        };
+        let tarfile = match &captured1[3] {
             TestOp::FO(rf) => match &rf.outfile {
                 Some(tmp_path) => tmp_path.clone(),
                 None => {
@@ -1421,6 +1509,20 @@ mod tests {
                                  ].map(OsString::from).to_vec(),
                                  dir: Some("/A/path".into()) }),
                      TestOp::SPO(
+                       RunExec { name: "g++".to_string(),
+                                 exe: "g++".into(),
+                                 args: [
+                                     "-E",
+                                     "-g",
+                                     "-O1",
+                                     "-march=mips",  // kept because strict = true
+                                     "-DDebug",
+                                     "-o",
+                                     &preproc_c_file,
+                                     "bar.c"
+                                 ].map(OsString::from).to_vec(),
+                                 dir: Some("/A/path".into()) }),
+                     TestOp::SPO(
                        RunExec { name: "clang:emit-llvm".to_string(),
                                  exe: "/path/to/clang".into(),
                                  args: [
@@ -1436,7 +1538,7 @@ mod tests {
                                      "-DDebug",
                                      "-o",
                                      "path/to/bitcode/foo.bc",
-                                     "bar.c"
+                                     &preproc_c_file,
                                  ].map(OsString::from).to_vec(),
                                  dir: Some("/A/path".into()) }),
                      TestOp::FO(
@@ -1496,8 +1598,15 @@ mod tests {
             }
         }
         let captured2 = bcopts_notstrict.executor.0.borrow().clone();
-        // Check temporary output file in the middle of the chain
-        let tarfile = match &captured2[2] {
+        // Check temporary output files in the middle of the chain
+        let preproc_c_file2 = match &captured2[1] {
+            TestOp::SPO(ro) => ro.args[3].to_string_lossy().into(),  // I counted...
+            _ => {
+                assert!(false, "unexpected FPO at preproc step in {:?}", captured1);
+                String::from("bad preprocessed c path")
+            }
+        };
+        let tarfile = match &captured2[3] {
             TestOp::FO(rf) => match &rf.outfile {
                 Some(tmp_path) => tmp_path.clone(),
                 None => {
@@ -1524,11 +1633,31 @@ mod tests {
                                  ].map(OsString::from).to_vec(),
                                  dir: Some("here".into()) }),
                      TestOp::SPO(
+                       RunExec { name: "mvcc".to_string(),
+                                 exe: "mvcc".into(),
+                                 args: [
+                                     "-E",
+                                     "-DDebug",
+                                     "-o",
+                                     &preproc_c_file2,
+                                     "bar.c"
+                                 ].map(OsString::from).to_vec(),
+                                 dir: Some("here".into()) }),
+                     TestOp::SPO(
                        RunExec { name: "clang:emit-llvm".to_string(),
                                  exe: "/path/to/clang".into(),
                                  args: [
                                      "-emit-llvm",
                                      "-c",
+                                     "-D__malloc__(X,Y)=",
+                                     "-D__atomic_store(X,Y,Z)=",
+                                     "-D__atomic_fetch_add(X,Y,Z)=0",
+                                     "-D__atomic_fetch_sub(X,Y,Z)=0",
+                                     "-D__atomic_fetch_and(X,Y,Z)=0",
+                                     "-D__atomic_fetch_or(X,Y,Z)=0",
+                                     "-D__atomic_compare_exchange(A,B,C,D,E,F)=0",
+                                     "-D__atomic_exchange(A,B,C,D)=0",
+                                     "-D__atomic_load(A,B,C)=0",
                                      "-g",
                                      "-O0",
                                      "-Wno-error=unused-command-line-argument",
@@ -1537,7 +1666,7 @@ mod tests {
                                      "-DDebug",
                                      "-o",
                                      "path/to/bitcode/foo.bc",
-                                     "bar.c"
+                                     &preproc_c_file2,
                                  ].map(OsString::from).to_vec(),
                                  dir: Some("here".into()) }),
                      TestOp::FO(

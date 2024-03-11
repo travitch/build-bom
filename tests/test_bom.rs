@@ -168,6 +168,7 @@ fn test_no_compile_only() -> anyhow::Result<()> {
                                     remove_arguments: Vec::new(),
                                     verbose: 0,
                                     strict: false,
+                                    preproc_native: false,
                                     command: cmd_opts,
                                     any_fail: true };
     common::gen_bitcode(gen_opts)?;
@@ -224,11 +225,26 @@ fn test_blddir() -> anyhow::Result<()> {
                                     objcopy_path: None,
                                     bcout_path: None,
                                     suppress_automatic_debug: false,
-                                    inject_arguments: Vec::new(),
+                                    inject_arguments: vec!(
+                                        [
+                                            // Strict is true, as is
+                                            // preproc_native, so make will
+                                            // invoke gcc which will be used for
+                                            // the preprocessing stage, which
+                                            // generates some definitions not
+                                            // valid for clang.  When not strict,
+                                            // build-bom disables these
+                                            // automatically, but in strict mode,
+                                            // the argument injection is needed.
+                                            "-D__malloc__(X,Y)=",
+                                        ]
+                                            .iter()
+                                            .map(|s| String::from(*s))
+                                            .collect()),
                                     remove_arguments: Vec::new(),
                                     verbose: 1,
                                     strict: true,
-                                    // preproc_native: true,
+                                    preproc_native: true,
                                     command: cmd_opts,
                                     any_fail : true };
     common::gen_bitcode(gen_opts)?;

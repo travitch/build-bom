@@ -78,6 +78,7 @@ fn zlib_do_build() -> anyhow::Result<(TempDir, String, PathBuf)> {
                                     remove_arguments: Vec::new(),
                                     verbose: 1,
                                     strict: false,
+                                    preproc_native: false,
                                     command: cmd_opts,
                                     any_fail: false };
     // n.b. any_fail must be false because zlib runs autoconf/configure and the
@@ -283,6 +284,7 @@ fn test_zlib_exe_modified() -> anyhow::Result<()> {
                                         remove_arguments: Vec::new(),
                                         verbose: 2,
                                         strict: false,
+                                        preproc_native: true,
                                         command: cmd_opts,
                                         any_fail: false };
         {

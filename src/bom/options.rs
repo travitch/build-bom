@@ -72,6 +72,9 @@ pub struct BitcodeOptions {
     /// Remove clang arguments matching the given regular expression when generating bitcode
     #[arg(long="remove-argument")]
     pub remove_arguments : Vec<Regex>,
+    /// Pre-process with native compiler before generating bitcode.  This can be helpful for customized native compilers or cross-compilation.
+    #[arg(long="preproc-native", short='E')]
+    pub preproc_native : bool,
     /// Directory to place LLVM bitcode (bc) output data.
     ///
     /// The default is to place it next to the object file, but it must be
