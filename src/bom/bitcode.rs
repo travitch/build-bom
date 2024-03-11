@@ -285,13 +285,12 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
     //
     // The above is perfectly acceptable C, but if compile as C++ it yields:
     // error: ISO C++11 does not allow conversion from string literal to 'char*'.
-    let is_c_plusplus = orig_args.iter().find(
-        |&arg| arg.to_str().map(|a| !a.starts_with("-") &&
-                                (a.ends_with(".cc") ||
-                                 a.ends_with(".cpp")))
-            .unwrap_or_else(|| false))
-        .is_some();
-    let file_ext = if is_c_plusplus { ".cc" } else { ".c" };
+    //
+    // Re use of [0] below: If there are multiple input file (candidates)
+    // detected on the line, it is probably safe to just use the first since they
+    // all appeared together originally; all compilation commands must have at
+    // least one input file.
+    let file_ext = clang_support::input_language(&orig_args)[0].file_ext();
 
     // If the native compiler is used for preprocessing, it will write to a
     // temporary output file that is subsequently consumed by clang to generate
