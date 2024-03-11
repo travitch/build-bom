@@ -1,4 +1,6 @@
-use std::ffi::OsStr;
+use log::debug;
+use std::ffi::{OsStr, OsString};
+use std::string::String;
 
 /// Regular expressions for the programs that are recognized as C/C++ compilers
 /// that we can interpose on and substitute a clang call to generate bitcode.
@@ -29,6 +31,53 @@ pub fn is_compile_command_name(cmd_name : &OsStr) -> bool {
         Some(s) => { COMPILE_COMMAND_RE.is_match(s) }
     }
 }
+
+
+pub enum Language {
+    C,
+    Cplusplus,
+    Other
+}
+
+impl Language {
+    pub fn file_ext(&self) -> String {
+        match &self {
+            Language::C => ".c",
+            Language::Cplusplus => ".cc",
+            Language::Other => "",
+        }.to_string()
+    }
+}
+
+pub fn input_language<'a, T>(args: &T) -> Vec<Language>
+where T: IntoIterator<Item = &'a OsString> + Copy
+{
+    let mut lang = Vec::new();
+    let mut it = args.into_iter();
+    while let Some(os_arg) = it.next() {
+        let arg = os_arg.to_string_lossy();
+        if arg.starts_with("-") {
+            if next_arg_is_option_value(os_arg) {
+                it.next();
+            }
+        } else {
+            if arg.ends_with(".cc") ||
+                arg.ends_with(".cxx") ||
+                arg.ends_with(".C") ||
+                arg.ends_with(".cpp") { lang.push(Language::Cplusplus);
+                } else if arg.ends_with(".c") {
+                    lang.push(Language::C);
+                } else {
+                    // Could be an object file, a library, or simply a source
+                    // type not currently recognized.
+                    debug!("Unrecognized input language for: {}", arg);
+                    lang.push(Language::Other);
+                }
+        }
+    }
+    lang
+}
+
 
 // Regex for determining if the next command-line argument is a value associated
 // with the current argument (i.e. a unary argument whose value is not part of
