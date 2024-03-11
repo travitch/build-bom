@@ -196,6 +196,17 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
     };
     let ptracer1 = generate_bitcode(&mut sender, ptracer, &bc_opts)?;
 
+    // The top level command may have been a direct compile rather than a build
+    // tool (such as make).  This checks for that and performs bitcode
+    // generation/embedding if that is the case.
+    let topcmd = RunCommand {
+        bin: OsString::from(&cmd0[0]),
+        args: bitcode_options.command.iter().map(|s| OsString::from(s)).collect(),
+        env: vec![],  // presently unused, so not populated here
+        cwd: ".".into(),
+    };
+    post_process_actions(topcmd, &mut sender, &bc_opts);
+
     // Send a token to shut down the event collector thread
     sender.send(None)?;
     let summary = event_consumer.join().unwrap();
