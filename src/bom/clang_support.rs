@@ -314,3 +314,24 @@ pub fn is_blacklisted_clang_argument(strict_bc: bool, a : &OsStr) -> bool {
         }
     }
 }
+
+// GCC and clang have internal directives (from system-level include
+// files) for handling low-level things like alloc/dealloc resource
+// management, atomic operations, etc.  If the native compiler is GCC,
+// some of these directives will cause a failure on the clang bitcode
+// generation path if they are still present.  Since the bitcode is being
+// generated on a parallel effort and it is not being used for the final
+// executable, these internal directives can be nullified to get valid
+// bitcode with a minimal loss of information in that bitcode.
+pub static CLANG_PREPROC_DEFINES : &'static [&str] =
+    &[
+        "-D__malloc__(X,Y)=",
+        "-D__atomic_store(X,Y,Z)=",
+        "-D__atomic_fetch_add(X,Y,Z)=0",
+        "-D__atomic_fetch_sub(X,Y,Z)=0",
+        "-D__atomic_fetch_and(X,Y,Z)=0",
+        "-D__atomic_fetch_or(X,Y,Z)=0",
+        "-D__atomic_compare_exchange(A,B,C,D,E,F)=0",
+        "-D__atomic_exchange(A,B,C,D)=0",
+        "-D__atomic_load(A,B,C)=0",
+    ];
