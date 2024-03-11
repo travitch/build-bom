@@ -102,6 +102,7 @@ fn get_llvm_str(bc_file: &Path) -> anyhow::Result<String> {
 
 #[test]
 #[serial]
+#[test_log::test]
 fn test_zlib_sharedlib() -> anyhow::Result<()> {
     let ZlibBld { ref tdir, ref zlib_version, ref tgt_path } = *ZLIB_BLD;
     let mut so_path = tgt_path.clone();
@@ -132,6 +133,7 @@ fn test_zlib_sharedlib() -> anyhow::Result<()> {
 
 #[test]
 #[serial]
+#[test_log::test]
 fn test_zlib_staticlib() -> anyhow::Result<()> {
     let ZlibBld { ref tdir, ref tgt_path, .. } = *ZLIB_BLD;
     let mut lib_path = tgt_path.clone();
@@ -176,6 +178,7 @@ fn test_zlib_staticlib() -> anyhow::Result<()> {
 
 #[test]
 #[serial]
+#[test_log::test]
 fn test_zlib_exe_static() -> anyhow::Result<()> {
     let ZlibBld { ref tdir, ref tgt_path, .. } = *ZLIB_BLD;
     let mut exe_path = tgt_path.clone();
@@ -211,6 +214,7 @@ fn test_zlib_exe_static() -> anyhow::Result<()> {
 
 #[test]
 #[serial]
+#[test_log::test]
 fn test_zlib_exe_sharedlib() -> anyhow::Result<()> {
     let ZlibBld { ref tdir, ref tgt_path, .. } = *ZLIB_BLD;
     let mut exe_path = tgt_path.clone();
@@ -246,6 +250,7 @@ fn test_zlib_exe_sharedlib() -> anyhow::Result<()> {
 
 #[test]
 #[serial]
+#[test_log::test]
 fn test_zlib_exe_modified() -> anyhow::Result<()> {
     // In this test, one of the files that is part of the static library is
     // modified, and the library is rebuilt *without* using build-bom.  Then the
