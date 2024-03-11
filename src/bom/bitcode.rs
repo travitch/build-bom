@@ -340,6 +340,10 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
     }
     bcgen_op.push_arg("-Wno-error=unused-command-line-argument");
 
+    // C99 and later do not support implicit function declarations, but be more
+    // permissive (as GCC seems to be).
+    bcgen_op.push_arg("-Wno-error=implicit-function-declaration");
+
     // Add any arguments that the user directed us to
     let mut add_it = bc_opts.inject_arguments.iter();
     while let Some(arg) = add_it.next() {
@@ -1402,7 +1406,8 @@ mod tests {
                                        "-c",
                                        "-g",
                                        "-O0",
-                                     "-Wno-error=unused-command-line-argument",
+                                       "-Wno-error=unused-command-line-argument",
+                                       "-Wno-error=implicit-function-declaration",
                                        "-arg1",
                                        "-arg2", "arg2val",
                                        "-g",
@@ -1517,6 +1522,7 @@ mod tests {
                                      "-c",
                                      "-g",
                                      "-Wno-error=unused-command-line-argument",
+                                     "-Wno-error=implicit-function-declaration",
                                      "-arg1",
                                      "-arg2", "arg2val",
                                      "-g",
@@ -1648,6 +1654,7 @@ mod tests {
                                      "-g",
                                      "-O0",
                                      "-Wno-error=unused-command-line-argument",
+                                     "-Wno-error=implicit-function-declaration",
                                      "-arg1",
                                      "-arg2", "arg2val",
                                      "-DDebug",
