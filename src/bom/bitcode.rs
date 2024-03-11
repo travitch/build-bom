@@ -306,27 +306,15 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
                                    .set_label("clang:emit-llvm"));
 
     if bc_opts.native_preproc {
-        // GCC and clang have internal directives (from system-level include
-        // files) for handling low-level things like alloc/dealloc resource
-        // management, atomic operations, etc.  If the native compiler is GCC,
-        // some of these directives will cause a failure on the clang bitcode
-        // generation path if they are still present.  Since the bitcode is being
-        // generated on a parallel effort and it is not being used for the final
-        // executable, these internal directives can be nullified to get valid
-        // bitcode with a minimal loss of information in that bitcode.
+        // Make automatic corrections for preprocessing definitions not
+        // compatible with clang.
         //
         // If --strict is set, these are not applied and must be done manually
         // via --inject-argument="-D..." if still needed.
         if !bc_opts.strict {
-            bcgen_op.push_arg("-D__malloc__(X,Y)=");
-            bcgen_op.push_arg("-D__atomic_store(X,Y,Z)=");
-            bcgen_op.push_arg("-D__atomic_fetch_add(X,Y,Z)=0");
-            bcgen_op.push_arg("-D__atomic_fetch_sub(X,Y,Z)=0");
-            bcgen_op.push_arg("-D__atomic_fetch_and(X,Y,Z)=0");
-            bcgen_op.push_arg("-D__atomic_fetch_or(X,Y,Z)=0");
-            bcgen_op.push_arg("-D__atomic_compare_exchange(A,B,C,D,E,F)=0");
-            bcgen_op.push_arg("-D__atomic_exchange(A,B,C,D)=0");
-            bcgen_op.push_arg("-D__atomic_load(A,B,C)=0");
+            for ppd in clang_support::CLANG_PREPROC_DEFINES {
+                bcgen_op.push_arg(ppd);
+            }
         }
     } else {
         preprocess.active(&Activation::Disabled);
