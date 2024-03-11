@@ -269,3 +269,66 @@ fn test_blddir() -> anyhow::Result<()> {
     assert!(bc_path2.exists());
     Ok(())
 }
+
+#[test]
+#[serial]
+#[test_log::test]
+fn test_direct_compile() -> anyhow::Result<()> {
+    // This test invokes the compiler directly as the build operation (instead of
+    // invoking a build tool such as "make") to ensure that build is handled
+    // appropriately.
+    let path = Path::new(common::SOURCE_DIR).join("no_compile_only");
+    eprintln!("## Canonicalizing input: {:?} (from {:?})", path, env::current_dir());
+    let abs_path = match std::fs::canonicalize(path.as_path()) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("## Unable to canonicalize path {:?} (got {:?})", path, e);
+            return Err(From::from(e));
+        }
+    };
+    eprintln!("## Using source from: {:?}", abs_path);
+
+    let tdir = tempdir()?;
+    let _push1 = pushd(tdir.path())?;
+
+    let options = CopyOptions::new();
+    copy(abs_path, ".", &options)?;
+    let _push2 = pushd("no_compile_only")?;
+
+    eprintln!("## build-bom generate bitcode via gcc and clang at {:?}",
+              common::user_clang_cmd());
+    let cmd_opts = vec!["gcc", "-Wall", "-Werror",
+                        "-o", "hi-world",
+                        "hello-world.c"
+    ].iter().map(|s| (*s).into()).collect();
+    let gen_opts = BitcodeOptions { clang_path: common::user_clang_cmd(),
+                                    objcopy_path: None,
+                                    bcout_path: None,
+                                    suppress_automatic_debug: false,
+                                    inject_arguments: Vec::new(),
+                                    remove_arguments: Vec::new(),
+                                    verbose: 2,
+                                    strict: false,
+                                    preproc_native: true,
+                                    command: cmd_opts,
+                                    any_fail: true };
+    common::gen_bitcode(gen_opts)?;
+    eprintln!("## bitcode generation complete");
+
+    let mut exe_path = std::path::PathBuf::new();
+    exe_path.push("hi-world");
+    let mut bc_path = std::path::PathBuf::new();
+    bc_path.push("hi-world.bc");
+    let bc_path2 = bc_path.clone();
+    eprintln!("## extract bitcode from {:?} to {:?} using llvm-link at {:?}",
+              exe_path, bc_path, common::user_llvm_link_cmd());
+    let extract_opts = ExtractOptions { input: exe_path,
+                                        output: bc_path,
+                                        llvm_link_path: common::user_llvm_link_cmd(),
+                                        objcopy_path: None,
+                                        verbose: 2 };
+    common::extract_bitcode(extract_opts)?;
+    eprintln!("## bitcode extracted");
+    assert!(bc_path2.exists());
+    Ok(())
+}
