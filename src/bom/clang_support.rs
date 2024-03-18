@@ -241,6 +241,7 @@ static CLANG_ARGUMENT_BLACKLIST : &'static [&str] =
       r"^-Werror($|=)",
 
       // The following are GCC-only and unknown to CLANG
+      r"^-Wno-format-contains-nul",
       r"^-fno-allow-store-data-races$",
       r"^-fno-var-tracking-assignments$",
       r"^-fmerge-constants$",
@@ -296,6 +297,16 @@ static CLANG_ARGUMENT_STRICT_WHITELIST : &'static [&str] =
         r"^-O[0123gsz]$",
         r"^-Ofast$",
         r"^-Osize$",
+
+        // Source fortification requires optimization, so if optimization is
+        // being removed, FORTIFY_SOURCE should be removed as well.
+        r"^-D_FORTIFY_SOURCE",  //  may be followed by "=1", "=2", etc.
+
+        // Additionally, since this is a background operation and the primary
+        // compiler should be the arbiter of good code, disable excessive
+        // warnings:
+        r"-Wall",
+        r"-Wextra",
     ];
 
 lazy_static::lazy_static! {
