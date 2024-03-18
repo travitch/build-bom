@@ -81,7 +81,6 @@ use regex::RegexSet;
 use std::collections::HashMap;
 use std::path::{Path,PathBuf};
 use std::io::{Read,Write};
-use std::process;
 use std::ffi::{OsString};
 use std::os::unix::ffi::OsStringExt;
 use std::process::Command;
@@ -655,14 +654,17 @@ fn obj_already_has_bitcode(bc_opts : &BCOpts<impl OsRun>,
     }
 }
 
+const DISCARD_OUT_FILE: &str = "discard{out-file}";  // arbitrary
+const DISCARD_SECTION_FILE: &str = "discard{section-file}";  // arbitrary
+
 fn obj_already_has_bitcode_inner(bc_opts : &BCOpts<impl OsRun>,
                                  cwd : &Path,
                                  obj_target : &OsString,
                                  tmp_path : &Path) -> bool {
     let mut dummy_output = PathBuf::from(tmp_path);
-    dummy_output.push("discard{out-file}");  // arbitrary name
+    dummy_output.push(DISCARD_OUT_FILE);  // arbitrary name
     let mut section_output = PathBuf::from(tmp_path);
-    section_output.push("discard{section-file}");  // arbitrary name
+    section_output.push(DISCARD_SECTION_FILE);  // arbitrary name
     match run(&Executable::new("objcopy",
                                ExeFileSpec::Append,
                                ExeFileSpec::Append),
@@ -783,7 +785,7 @@ fn collect_events(chan : mpsc::Receiver<Option<Event>>) -> SummaryStats {
                 match evt {
                     Event::PipeInputOrOutput(cmd) => {
                         summary.num_pipe_io += 1;
-                        error!("Pipe I/O in command '{:?} {:?}'", cmd.bin, cmd.args);
+                        warn!("Pipe I/O in command '{:?} {:?}'", cmd.bin, cmd.args);
                     }
                     Event::ResponseFile(cmd) => {
                         summary.num_responsefile += 1;
@@ -1274,8 +1276,8 @@ mod tests {
         let argstr = arg.to_string_lossy();
         clean_temp_with_suffix(
             &clean_temp_with_suffix(&String::from(argstr),
-                                    "discard{section-file}"),
-            "discard{out-file}")
+                                    DISCARD_SECTION_FILE),
+            DISCARD_OUT_FILE)
             .into()
     }
 
@@ -1404,9 +1406,9 @@ mod tests {
                                  args: [
                                      "--dump-section",
                                      &format!(".llvm_bitcode={}",
-                                              "discard{section-file}"),
+                                              DISCARD_SECTION_FILE),
                                      "foo.obj",
-                                     "discard{out-file}"
+                                     DISCARD_OUT_FILE
                                  ].map(OsString::from).to_vec(),
                                  dir: Some("/somE/path".into()) }),
                      TestOp::SPO(
@@ -1506,9 +1508,9 @@ mod tests {
                                  args: [
                                      "--dump-section",
                                      &format!(".llvm_bitcode={}",
-                                              "discard{section-file}"),
+                                              DISCARD_SECTION_FILE),
                                      "foo.obj",
-                                     "discard{out-file}"
+                                     DISCARD_OUT_FILE
                                  ].map(OsString::from).to_vec(),
                                  dir: Some("/A/path".into()) }),
                      TestOp::SPO(
@@ -1631,9 +1633,9 @@ mod tests {
                                  args: [
                                      "--dump-section",
                                      &format!(".llvm_bitcode={}",
-                                              "discard{section-file}"),
+                                              DISCARD_SECTION_FILE),
                                      "foo.obj",
-                                     "discard{out-file}"
+                                     DISCARD_OUT_FILE
                                  ].map(OsString::from).to_vec(),
                                  dir: Some("here".into()) }),
                      TestOp::SPO(
