@@ -300,7 +300,8 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
     // detected on the line, it is probably safe to just use the first since they
     // all appeared together originally; all compilation commands must have at
     // least one input file.
-    let file_ext = clang_support::input_language(&orig_args)[0].file_ext();
+    let inp_lang = &clang_support::input_language(&orig_args)[0];
+    let file_ext = inp_lang.file_ext();
 
     // If the native compiler is used for preprocessing, it will write to a
     // temporary output file that is subsequently consumed by clang to generate
@@ -314,6 +315,12 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
 
     let mut bcgen_op = ops.push_op(&run(&*CLANG_LLVM, bc_opts.clang_path)
                                    .set_label("clang:emit-llvm"));
+    match inp_lang {
+        clang_support::Language::Cplusplus => {
+            bcgen_op.set_executable("clang++");
+        },
+        _ => {},
+    };
 
     if bc_opts.native_preproc {
         // Make automatic corrections for preprocessing definitions not
