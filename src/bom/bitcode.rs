@@ -1231,6 +1231,7 @@ mod tests {
         name: String,
         exe: PathBuf,
         args: Vec<OsString>,
+        env: EnvSpec,
         dir: Option<PathBuf>
     }
     #[derive(Clone, Debug, PartialEq)]
@@ -1294,12 +1295,14 @@ mod tests {
                           label: &str,
                           exe_file: &Path,
                           args: &Vec<OsString>,
+                          exe_env: &EnvSpec,
                           fromdir: &Option<PathBuf>) -> OsRunResult
         {
             self.0.borrow_mut()
                 .push(TestOp::SPO(RunExec{ name: String::from(label),
                                            exe: PathBuf::from(exe_file),
                                            args: clean_temp_in_args(args),
+                                           env: exe_env.clone(),
                                            dir: fromdir.clone()
             }));
             OsRunResult::Good
@@ -1417,6 +1420,7 @@ mod tests {
                                      "foo.obj",
                                      DISCARD_OUT_FILE
                                  ].map(OsString::from).to_vec(),
+                                 env: EnvSpec::StdEnv,
                                  dir: Some("/somE/path".into()) }),
                      TestOp::SPO(
                          RunExec { name: "clang:emit-llvm".to_string(),
@@ -1436,6 +1440,7 @@ mod tests {
                                        "path/to/bitcode/foo.bc",
                                        "bar.c"
                                    ].map(OsString::from).to_vec(),
+                                   env: EnvSpec::StdEnv,
                                    dir: Some("/somE/path".into()) }),
                      TestOp::FO(
                          RunFunc { fname: "gen_bitcode_tar".to_string(),
@@ -1453,6 +1458,7 @@ mod tests {
                                                 tarfile.display()),
                                        "foo.obj"
                                    ].map(OsString::from).to_vec(),
+                                   env: EnvSpec::StdEnv,
                                    dir: Some("/somE/path".into()) }),
                    ]);
 
@@ -1519,6 +1525,7 @@ mod tests {
                                      "foo.obj",
                                      DISCARD_OUT_FILE
                                  ].map(OsString::from).to_vec(),
+                                 env: EnvSpec::StdEnv,
                                  dir: Some("/A/path".into()) }),
                      TestOp::SPO(
                        RunExec { name: "g++".to_string(),
@@ -1533,6 +1540,7 @@ mod tests {
                                      &preproc_c_file,
                                      "bar.c"
                                  ].map(OsString::from).to_vec(),
+                                 env: EnvSpec::StdEnv,
                                  dir: Some("/A/path".into()) }),
                      TestOp::SPO(
                        RunExec { name: "clang:emit-llvm".to_string(),
@@ -1553,6 +1561,7 @@ mod tests {
                                      "path/to/bitcode/foo.bc",
                                      &preproc_c_file,
                                  ].map(OsString::from).to_vec(),
+                                 env: EnvSpec::StdEnv,
                                  dir: Some("/A/path".into()) }),
                      TestOp::FO(
                          RunFunc { fname: "gen_bitcode_tar".to_string(),
@@ -1570,6 +1579,7 @@ mod tests {
                                                 tarfile.display()),
                                        "foo.obj"
                                    ].map(OsString::from).to_vec(),
+                                   env: EnvSpec::StdEnv,
                                    dir: Some("/A/path".into()) }),
                    ]);
 
@@ -1644,6 +1654,7 @@ mod tests {
                                      "foo.obj",
                                      DISCARD_OUT_FILE
                                  ].map(OsString::from).to_vec(),
+                                 env: EnvSpec::StdEnv,
                                  dir: Some("here".into()) }),
                      TestOp::SPO(
                        RunExec { name: "mvcc".to_string(),
@@ -1655,6 +1666,7 @@ mod tests {
                                      &preproc_c_file2,
                                      "bar.c"
                                  ].map(OsString::from).to_vec(),
+                                 env: EnvSpec::StdEnv,
                                  dir: Some("here".into()) }),
                      TestOp::SPO(
                        RunExec { name: "clang:emit-llvm".to_string(),
@@ -1682,6 +1694,7 @@ mod tests {
                                      "path/to/bitcode/foo.bc",
                                      &preproc_c_file2,
                                  ].map(OsString::from).to_vec(),
+                                 env: EnvSpec::StdEnv,
                                  dir: Some("here".into()) }),
                      TestOp::FO(
                          RunFunc { fname: "gen_bitcode_tar".to_string(),
@@ -1699,6 +1712,7 @@ mod tests {
                                                 tarfile.display()),
                                        "foo.obj"
                                    ].map(OsString::from).to_vec(),
+                                   env: EnvSpec::StdEnv,
                                    dir: Some("here".into()) }),
                    ]);
 
