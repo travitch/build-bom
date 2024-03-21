@@ -144,8 +144,8 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
 name = "chainsop"
-version = "0.1.0"
-source = "git+https://github.com/kquick/chainsop.git#48402c83af507f3613c69a531cf14ff3f7d73e58"
+version = "0.1.1"
+source = "git+https://github.com/kquick/chainsop.git#81750f5d8b053eb8aa00264c0ee81cd3619878b8"
 dependencies = [
  "anyhow",
  "filesprep_derive",
@@ -260,7 +260,7 @@ dependencies = [
 [[package]]
 name = "filesprep_derive"
 version = "0.1.0"
-source = "git+https://github.com/kquick/chainsop.git#48402c83af507f3613c69a531cf14ff3f7d73e58"
+source = "git+https://github.com/kquick/chainsop.git#81750f5d8b053eb8aa00264c0ee81cd3619878b8"
 dependencies = [
  "quote",
  "syn 1.0.74",
