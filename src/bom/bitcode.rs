@@ -1224,7 +1224,7 @@ mod tests {
     use std::rc::Rc;
     use std::sync::mpsc;
     use super::*;
-    use chainsop::{ActualFile, Executor, OsRun, OsRunResult};
+    use chainsop::{ActualFile, Executor, EnvSpec, OsRun, OsRunResult};
 
     #[derive(Clone, Debug, PartialEq)]
     struct RunExec {
