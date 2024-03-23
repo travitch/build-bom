@@ -317,7 +317,7 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
                                    .set_label("clang:emit-llvm"));
     match inp_lang {
         clang_support::Language::Cplusplus => {
-            bcgen_op.set_executable("clang++");
+            bcgen_op.push_arg("-x").push_arg("c++");
         },
         _ => {},
     };
