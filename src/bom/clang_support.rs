@@ -266,6 +266,7 @@ static CLANG_ARGUMENT_BLACKLIST : &'static [&str] =
       // Options which generate ancillary files that should not be changed from
       // the primary compilation run.
       r"^-MF$",
+      r"^-MP$",
       r"^-MT$", // not strictly output, but fails without -M or -MM
 
       r"^-Q$",
