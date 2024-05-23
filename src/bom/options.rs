@@ -66,7 +66,7 @@ pub struct BitcodeOptions {
     /// information in bitcode files
     #[arg(long="suppress-automatic-debug")]
     pub suppress_automatic_debug : bool,
-    /// Inject the given argument into the clang argument list when generating bitcode
+    /// Inject the given argument into the clang argument list when generating bitcode (e.g. --inject-argument=-march=i386)
     #[arg(long="inject-argument")]
     pub inject_arguments : Vec<String>,
     /// Remove clang arguments matching the given regular expression when generating bitcode
