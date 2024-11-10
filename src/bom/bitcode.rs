@@ -808,7 +808,7 @@ fn collect_events(chan : mpsc::Receiver<Option<Event>>) -> SummaryStats {
                     }
                     Event::BuildFailureUnknownEffect(cmd, exit_code) => {
                         summary.build_failures_unknown_effect += 1;
-                        error!("Failed compile command may affect bitcode coverage '{:?} {:?} = {}'", cmd.bin, cmd.args, exit_code);
+                        warn!("Failed build command may affect bitcode coverage '{:?} {:?} = {}'", cmd.bin, cmd.args, exit_code);
                     }
                     Event::SkippingAssembleOnlyCommand(cmd) => {
                         summary.skipping_assemble_only += 1;
