@@ -209,6 +209,17 @@ pub fn bitcode_entrypoint(bitcode_options : &BitcodeOptions) -> anyhow::Result<i
     // Send a token to shut down the event collector thread
     sender.send(None)?;
     let summary = event_consumer.join().unwrap();
+
+    // Explicitly drop the sender resource.  Note that this explicit
+    // reference to sender here ensures that sender remains valid up
+    // through this point.  Previously, this drop was not present, which
+    // caused a race condition wherein the sender was never needed after
+    // the `sender.send(None)` above and thus it could be destroyed at that
+    // point; if it was destroyed before the collect_events could read the
+    // `None` then the latter would instead get a Recv Error, causing
+    // failures to be reported.
+    drop(sender);
+
     let exitmod =
         if bitcode_options.any_fail && summary.has_failures() {
             // If the mainline succeeded (ec == 0), return an error indicating
