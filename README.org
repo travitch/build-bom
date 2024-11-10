@@ -66,6 +66,8 @@ There are four key observations enabling this approach to bitcode collection:
 
 We wrap our generated bitcode in singleton tar files and allow the linker to accumulate them for us. When we want to collect aggregated bitcode for executable artifacts, we simply extract the tar file from their special LLVM bitcode ELF sections, extract the collected bitcode, and link it together with ~llvm-link~.
 
+[[./doc/build_bom_seq.svg]]
+
 Observe as well that the ~build-bom~ process useful for selective rebuilds: rebuilding only a portion of the sources will still have access to llvm-bitcode ELF sections in object from previous builds.  The use of ~build-bom~ also has graceful degradation properties: object files which do not have llvm bitcode sections in their ELF (i.e. built separately without using ~build-bom~) will simply not contributed to the ELF section/tarfile accumulation of bitcode; the final extraction ~llvm-link~ does not need to be total and is tolerant of unresolved symbols.
 
 The bitcode extracted will be representative of the binary code contained in the specified file.  It will not necessarily be identical to that code due to strictness flags, differences between clang and the native build compiler, and a different linking step.

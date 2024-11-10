@@ -1,0 +1,21 @@
+shape: sequence_diagram
+build-bom
+build tool
+"Project's build tool": {
+  build tool."make,\ncmake,\nmeson,\nother ..."
+}
+build-bom.run -> build tool.all : fork + ptrace
+build tool.all -> compile.run
+compile.run -> build-bom.run.start : ptrace: "starting"
+build-bom.run.start -> compile.run : ptrace: "ok, continue"
+compile.run -> build-bom.run.end : ptrace: "finishing"
+build-bom.run.end -> clang.run : -emit-llvm
+clang.run -> build-bom.run.end : llvm bitcode
+build-bom."Insert llvm bitcode in compile's ELF obj file"
+build-bom.run.end -> compile.run {
+  style.stroke-dash: 5
+}
+build-bom.run.end -> compile.run : ptrace: "ok, continue"
+compile.run -> build tool.all
+build tool."Repeats above as needed for build"
+build tool.all -> build-bom.run
