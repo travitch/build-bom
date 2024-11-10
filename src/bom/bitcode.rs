@@ -1007,7 +1007,8 @@ fn extract_compile_modifiers(rc : &RunCommand) -> CompileModifiers {
         // file containing post-preprocessor form of foo.s, and *not* bitcode,
         // so if it looks like and assembly source file, skip it.
         if !arg.to_str().unwrap().starts_with("-")
-            && arg.to_str().unwrap().ends_with(".s") {
+            && (arg.to_str().unwrap().ends_with(".s")
+                || arg.to_str().unwrap().ends_with(".S")) {
                 mods.is_assemble_only = true;
             }
     }
