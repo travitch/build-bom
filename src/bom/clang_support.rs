@@ -177,7 +177,8 @@ static FOLLOWING_ARG_OPTIONS : &'static [&str] =
       r"^-rpath$",   // unique to clang
       r"^-current_version$",
       r"^-compatibility_version$",
-      r"^-dumpbase$"
+      r"^-dumpbase$",
+      r"^-target$"
     ];
 
 lazy_static::lazy_static! {
