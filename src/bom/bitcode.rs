@@ -451,6 +451,10 @@ fn build_bitcode_arguments(chan : &mut mpsc::Sender<Option<Event>>,
                     let mut target_path = PathBuf::from(source_file);
                     target_path.set_extension("o");
                     ops.set_output_file(&FileArg::loc(target_path.clone()));
+                    let target_path = make_bitcode_filename(
+                        &target_path.clone().into_os_string(),
+                        bc_opts.bitcode_directory);
+                    bcgen_op.set_output_file(&FileArg::loc(target_path.clone()));
                     Ok(OsString::from(target_path))
                 }
                 Err(msg) => {
@@ -808,7 +812,7 @@ fn collect_events(chan : mpsc::Receiver<Option<Event>>) -> SummaryStats {
                     }
                     Event::BuildFailureUnknownEffect(cmd, exit_code) => {
                         summary.build_failures_unknown_effect += 1;
-                        warn!("Failed build command may affect bitcode coverage '{:?} {:?} = {}'", cmd.bin, cmd.args, exit_code);
+                        error!("Failed compile command may affect bitcode coverage '{:?} {:?} = {}'", cmd.bin, cmd.args, exit_code);
                     }
                     Event::SkippingAssembleOnlyCommand(cmd) => {
                         summary.skipping_assemble_only += 1;
