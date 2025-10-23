@@ -18,7 +18,7 @@ path = "src/lib.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-pete = "^0.7"
+pete = "^0.13"
 os_pipe = "^0.9"
 anyhow = "^1"
 byteorder = "^1.3"
